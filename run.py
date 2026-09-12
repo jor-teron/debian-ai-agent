@@ -95,9 +95,9 @@ PROVIDERS = {
         "label": "Gemini",
         "env_key": "GEMINI_API_KEY",
         "kind": "gemini",
-        "free": ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"],
-        "paid": ["gemini-2.5-pro", "gemini-1.5-pro"],
-        "default": "gemini-2.0-flash",
+        "free": ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
+        "paid": ["gemini-3.6-pro", "gemini-3.5-pro", "gemini-2.5-pro"],
+        "default": "gemini-3.6-flash",
     },
     "openai": {
         "label": "OpenAI (ChatGPT)",
@@ -1173,7 +1173,7 @@ const tier=document.getElementById('tier'),model=document.getElementById('model'
 const status=document.getElementById('status'),input=document.getElementById('input'),send=document.getElementById('send');
 const note=document.getElementById('note'),confirmBar=document.getElementById('confirm'),pendingCmd=document.getElementById('pendingCmd');
 const fileInput=document.getElementById('file');
-let catalog={providers:{},default_provider:'gemini',default_model:'gemini-2.0-flash'}, history=[], keys={};
+let catalog={providers:{},default_provider:'gemini',default_model:'gemini-3.6-flash'}, history=[], keys={};
 function fillProviders(){
   provider.innerHTML='';
   Object.keys(catalog.providers||{}).forEach(pid=>{
