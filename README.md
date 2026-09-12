@@ -2,7 +2,7 @@
 
 Chat with Gemini in your browser. The app can also work with files and shell commands inside a safe folder.
 
-**Needs:** Python 3 only (already on most Debian PCs).  
+**Needs:** Python **3.8+** (the normal `python3` on Debian/Ubuntu/Raspberry Pi, Windows, macOS). Stdlib only — no special Python flavor.  
 **Does not need:** Apache, Node, Docker, pip, or a local AI model.
 
 ---
@@ -64,5 +64,6 @@ Same API key — Paid only works if your Google project allows those models.
 | “API key missing” | Edit `.env`, save, run `python3 run.py` again |
 | Browser can’t connect | Make sure `python3 run.py` is still running |
 | Paid model error | Switch the UI back to **Free** |
+| `Need Python 3.8+` | Install/update Python 3, then run `python3 --version` |
 
 That’s it.

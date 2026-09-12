@@ -7,9 +7,8 @@ Minimal personal AI agent for Debian.
 - Gemini API key from .env (never sent to the browser)
 - Simple file + shell tools jailed to ./agent-workspace
 """
-from __future__ import annotations
-
 import json
+import sys
 import os
 import re
 import subprocess
@@ -17,6 +16,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent
 WORKSPACE = ROOT / "agent-workspace"
@@ -123,8 +123,8 @@ boot();
 """
 
 
-def load_env() -> dict[str, str]:
-    out: dict[str, str] = {}
+def load_env():
+    out = {}  # type: Dict[str, str]
     if not ENV_PATH.exists():
         return out
     for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
@@ -144,7 +144,7 @@ def default_model() -> str:
     return (load_env().get("GEMINI_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
 
 
-def allowed(model: str | None) -> str:
+def allowed(model):
     all_m = set(FREE_MODELS) | set(PAID_MODELS)
     if model and model in all_m:
         return model
@@ -256,7 +256,7 @@ TOOL_DECLS = [
 ]
 
 
-def dispatch(name: str, args: dict) -> dict:
+def dispatch(name, args):
     try:
         if name == "list_dir":
             return tool_list_dir(args.get("path") or ".")
@@ -271,7 +271,7 @@ def dispatch(name: str, args: dict) -> dict:
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
-def gemini_chat(message: str, model: str, history: list) -> dict:
+def gemini_chat(message, model, history):
     key = api_key()
     if not key:
         return {"ok": False, "error": "GEMINI_API_KEY missing. Copy .env.example to .env and add your key.", "reply": "", "tools": []}
@@ -344,14 +344,14 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # quieter terminal
         print("[%s] %s" % (self.log_date_time_string(), fmt % args))
 
-    def _send(self, code: int, body: bytes, content_type: str) -> None:
+    def _send(self, code, body, content_type):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, code: int, obj: dict) -> None:
+    def _json(self, code, obj):
         raw = json.dumps(obj).encode("utf-8")
         self._send(code, raw, "application/json; charset=utf-8")
 
@@ -394,7 +394,10 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200 if result.get("ok") else 400, result)
 
 
-def main() -> None:
+def main():
+    if sys.version_info < (3, 8):
+        sys.stderr.write("Need Python 3.8+. You have %s\n" % sys.version.split()[0])
+        sys.exit(1)
     ensure_ws()
     if not ENV_PATH.exists() and (ROOT / ".env.example").exists():
         print("Tip: copy .env.example to .env and add GEMINI_API_KEY")
