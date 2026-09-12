@@ -4,7 +4,7 @@ Minimal personal AI agent for Debian.
 
 - Stdlib only (no pip / venv / Apache)
 - Local chat page (HOST/PORT from .env)
-- Gemini API key from .env (never sent to the browser)
+- Multiple AI providers (Gemini, OpenAI, xAI, Anthropic, DeepSeek)
 - File + shell tools jailed to workspace
 """
 import base64
@@ -86,17 +86,58 @@ JOBS_FILE = WORKSPACE / "jobs.json"
 JOBS_LOG = WORKSPACE / "jobs_log.md"
 HOST, PORT = _host_port()
 
-FREE_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-2.5-flash",
-]
-PAID_MODELS = [
-    "gemini-2.5-pro",
-    "gemini-1.5-pro",
-]
-DEFAULT_MODEL = "gemini-2.0-flash"
-API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+# Provider catalog: Free = cheaper/faster defaults, Paid = stronger.
+# Model IDs chosen from current public docs (2026-09); see FEATURES.md.
+PROVIDERS = {
+    "gemini": {
+        "label": "Gemini",
+        "env_key": "GEMINI_API_KEY",
+        "kind": "gemini",
+        "free": ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-2.5-flash"],
+        "paid": ["gemini-2.5-pro", "gemini-1.5-pro"],
+        "default": "gemini-2.0-flash",
+    },
+    "openai": {
+        "label": "OpenAI (ChatGPT)",
+        "env_key": "OPENAI_API_KEY",
+        "kind": "openai",
+        "base": "https://api.openai.com/v1",
+        "free": ["gpt-4o-mini", "gpt-4.1-mini"],
+        "paid": ["gpt-4o", "gpt-4.1"],
+        "default": "gpt-4o-mini",
+    },
+    "xai": {
+        "label": "xAI (Grok)",
+        "env_key": "XAI_API_KEY",
+        "kind": "openai",
+        "base": "https://api.x.ai/v1",
+        "free": ["grok-4.3", "grok-3-mini"],
+        "paid": ["grok-4.6", "grok-4.5"],
+        "default": "grok-4.3",
+    },
+    "anthropic": {
+        "label": "Anthropic (Claude)",
+        "env_key": "ANTHROPIC_API_KEY",
+        "kind": "anthropic",
+        "base": "https://api.anthropic.com/v1",
+        "free": ["claude-haiku-4-5"],
+        "paid": ["claude-sonnet-5", "claude-sonnet-4-6"],
+        "default": "claude-haiku-4-5",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "env_key": "DEEPSEEK_API_KEY",
+        "kind": "openai",
+        "base": "https://api.deepseek.com/v1",
+        "free": ["deepseek-chat"],
+        "paid": ["deepseek-reasoner"],
+        "default": "deepseek-chat",
+    },
+}
+
+DEFAULT_PROVIDER = "gemini"
 
 BLOCKED = re.compile(
     r"(?ix)(rm\s+-rf\s+/)|(mkfs\b)|(\bdd\b.*\bof=/dev/)|(shutdown\b)|(reboot\b)|(poweroff\b)"
@@ -117,20 +158,44 @@ def load_env():
     return _read_dotenv()
 
 
-def api_key() -> str:
-    return (load_env().get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY") or "").strip()
+def _env_get(name):
+    return (load_env().get(name) or os.environ.get(name) or "").strip()
 
 
-def default_model() -> str:
-    return (load_env().get("GEMINI_MODEL") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+def provider_key(provider):
+    meta = PROVIDERS.get(provider) or {}
+    ek = meta.get("env_key") or ""
+    return _env_get(ek) if ek else ""
 
 
-def allowed(model):
-    all_m = set(FREE_MODELS) | set(PAID_MODELS)
+def keys_status():
+    return {pid: bool(provider_key(pid)) for pid in PROVIDERS}
+
+
+def default_provider():
+    p = (_env_get("PROVIDER") or DEFAULT_PROVIDER).lower()
+    return p if p in PROVIDERS else DEFAULT_PROVIDER
+
+
+def default_model(provider=None):
+    provider = provider or default_provider()
+    meta = PROVIDERS[provider]
+    # Optional per-provider model env: GEMINI_MODEL, OPENAI_MODEL, etc.
+    env_name = meta["env_key"].replace("_API_KEY", "_MODEL")
+    m = _env_get(env_name) or meta["default"]
+    return allowed(provider, m)
+
+
+def allowed(provider, model):
+    meta = PROVIDERS.get(provider)
+    if not meta:
+        provider = default_provider()
+        meta = PROVIDERS[provider]
+    all_m = set(meta["free"]) | set(meta["paid"])
     if model and model in all_m:
         return model
-    d = default_model()
-    return d if d in all_m else FREE_MODELS[0]
+    d = meta["default"]
+    return d if d in all_m else meta["free"][0]
 
 
 def ensure_ws():
@@ -297,7 +362,6 @@ def _parse_due(due_iso=None, in_minutes=None):
     if due_iso:
         s = str(due_iso).strip()
         try:
-            # Accept Z or offset; store as ISO
             if s.endswith("Z"):
                 s = s[:-1] + "+00:00"
             dt = datetime.fromisoformat(s)
@@ -411,32 +475,88 @@ def tool_job_list():
     return {"ok": True, "jobs": _load_json_list(JOBS_FILE)}
 
 
-def _gemini_plain(prompt, model=None):
-    """Short Gemini call without tools (for scheduled jobs)."""
-    key = api_key()
-    if not key:
-        return {"ok": False, "error": "No API key", "reply": ""}
-    model = allowed(model or default_model())
-    url = "%s/models/%s:generateContent?key=%s" % (API_BASE, model, key)
-    body = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 1024},
-    }
+def _http_json(url, body, headers, timeout=90):
     req = urllib.request.Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _plain_chat(prompt, provider=None, model=None):
+    """Short call without tools (for scheduled jobs)."""
+    provider = provider or default_provider()
+    if provider not in PROVIDERS:
+        provider = DEFAULT_PROVIDER
+    model = allowed(provider, model or default_model(provider))
+    key = provider_key(provider)
+    if not key:
+        return {"ok": False, "error": "No API key for %s" % provider, "reply": ""}
+    meta = PROVIDERS[provider]
+    kind = meta["kind"]
     try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        if kind == "gemini":
+            url = "%s/models/%s:generateContent?key=%s" % (GEMINI_API_BASE, model, key)
+            data = _http_json(
+                url,
+                {
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {"maxOutputTokens": 1024},
+                },
+                {"Content-Type": "application/json"},
+                timeout=60,
+            )
+            parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
+            texts = [p.get("text", "") for p in parts if "text" in p]
+            reply = "\n".join(texts).strip() or "(No text)"
+            return {"ok": True, "reply": reply, "model": model, "provider": provider}
+        if kind == "openai":
+            url = meta["base"].rstrip("/") + "/chat/completions"
+            data = _http_json(
+                url,
+                {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 1024,
+                },
+                {
+                    "Content-Type": "application/json",
+                    "Authorization": "Bearer %s" % key,
+                },
+                timeout=60,
+            )
+            msg = ((data.get("choices") or [{}])[0].get("message") or {})
+            reply = (msg.get("content") or "").strip() or "(No text)"
+            return {"ok": True, "reply": reply, "model": model, "provider": provider}
+        if kind == "anthropic":
+            url = meta["base"].rstrip("/") + "/messages"
+            data = _http_json(
+                url,
+                {
+                    "model": model,
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                {
+                    "Content-Type": "application/json",
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                },
+                timeout=60,
+            )
+            texts = [
+                b.get("text", "")
+                for b in (data.get("content") or [])
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
+            reply = "\n".join(texts).strip() or "(No text)"
+            return {"ok": True, "reply": reply, "model": model, "provider": provider}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e), "reply": ""}
-    parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
-    texts = [p.get("text", "") for p in parts if "text" in p]
-    reply = "\n".join(texts).strip() or "(No text)"
-    return {"ok": True, "reply": reply, "model": model}
+    return {"ok": False, "error": "Unknown provider kind", "reply": ""}
 
 
 def process_due_jobs():
@@ -462,7 +582,7 @@ def process_due_jobs():
         if last_ts and (now - last_ts) < mins * 60:
             continue
         prompt = it.get("prompt") or ""
-        result = _gemini_plain(
+        result = _plain_chat(
             "Scheduled job (%s). Respond briefly.\n\n%s" % (it.get("id"), prompt)
         )
         ensure_ws()
@@ -497,13 +617,16 @@ def tool_web_search(query):
     q = (query or "").strip()
     if not q:
         return {"ok": False, "error": "Empty query"}
-    key = api_key()
+    key = provider_key("gemini")
     if not key:
-        return {"ok": False, "error": "GEMINI_API_KEY missing"}
-    model = allowed(default_model())
-    url = "%s/models/%s:generateContent?key=%s" % (API_BASE, model, key)
+        return {
+            "ok": False,
+            "error": "web_search needs GEMINI_API_KEY (uses Gemini Google Search). Set it in .env or skip search.",
+            "query": q,
+        }
+    model = allowed("gemini", PROVIDERS["gemini"]["default"])
+    url = "%s/models/%s:generateContent?key=%s" % (GEMINI_API_BASE, model, key)
 
-    # Prefer google_search; fall back to googleSearch if API rejects shape
     tool_shapes = [{"google_search": {}}, {"googleSearch": {}}]
     last_err = ""
     for tools_obj in tool_shapes:
@@ -511,19 +634,11 @@ def tool_web_search(query):
             "contents": [{"role": "user", "parts": [{"text": "Summarize search results for: %s" % q}]}],
             "tools": [tools_obj],
         }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            data = _http_json(url, body, {"Content-Type": "application/json"}, timeout=60)
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")[:600]
             last_err = "HTTP %s: %s" % (e.code, err)
-            # try next shape
             continue
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error": str(e), "query": q}
@@ -531,7 +646,6 @@ def tool_web_search(query):
         parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
         texts = [p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p]
         summary = "\n".join(texts).strip() or "(No search summary)"
-        # Optional grounding metadata
         gm = ((data.get("candidates") or [{}])[0].get("groundingMetadata")) or {}
         return {
             "ok": True,
@@ -637,6 +751,31 @@ TOOL_DECLS = [
 ]
 
 
+def openai_tools():
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t.get("parameters") or {"type": "object", "properties": {}},
+            },
+        }
+        for t in TOOL_DECLS
+    ]
+
+
+def anthropic_tools():
+    return [
+        {
+            "name": t["name"],
+            "description": t["description"],
+            "input_schema": t.get("parameters") or {"type": "object", "properties": {}},
+        }
+        for t in TOOL_DECLS
+    ]
+
+
 def dispatch(name, args):
     try:
         if name == "list_dir":
@@ -671,23 +810,24 @@ def dispatch(name, args):
 
 
 def gemini_chat(message, model, history):
-    key = api_key()
+    key = provider_key("gemini")
     if not key:
         return {
             "ok": False,
             "error": "GEMINI_API_KEY missing. Copy .env.example to .env and add your key.",
             "reply": "",
             "tools": [],
+            "provider": "gemini",
         }
 
-    model = allowed(model)
+    model = allowed("gemini", model)
     contents = []
     for turn in (history or [])[-16:]:
         role = "user" if turn.get("role") == "user" else "model"
         contents.append({"role": role, "parts": [{"text": turn.get("content", "")}]})
     contents.append({"role": "user", "parts": [{"text": message}]})
 
-    url = "%s/models/%s:generateContent?key=%s" % (API_BASE, model, key)
+    url = "%s/models/%s:generateContent?key=%s" % (GEMINI_API_BASE, model, key)
     tool_trace = []
     reply = ""
     system = build_system()
@@ -698,15 +838,8 @@ def gemini_chat(message, model, history):
             "contents": contents,
             "tools": [{"function_declarations": TOOL_DECLS}],
         }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
         try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+            data = _http_json(url, body, {"Content-Type": "application/json"}, timeout=90)
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")[:800]
             return {
@@ -715,9 +848,17 @@ def gemini_chat(message, model, history):
                 "reply": "",
                 "tools": tool_trace,
                 "model": model,
+                "provider": "gemini",
             }
         except Exception as e:  # noqa: BLE001
-            return {"ok": False, "error": str(e), "reply": "", "tools": tool_trace, "model": model}
+            return {
+                "ok": False,
+                "error": str(e),
+                "reply": "",
+                "tools": tool_trace,
+                "model": model,
+                "provider": "gemini",
+            }
 
         parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
         fn_calls, texts = [], []
@@ -748,7 +889,226 @@ def gemini_chat(message, model, history):
     else:
         reply = reply or "Stopped after too many tool steps."
 
-    return {"ok": True, "reply": reply, "tools": tool_trace, "model": model}
+    return {"ok": True, "reply": reply, "tools": tool_trace, "model": model, "provider": "gemini"}
+
+
+def openai_compat_chat(provider, message, model, history):
+    meta = PROVIDERS[provider]
+    key = provider_key(provider)
+    if not key:
+        return {
+            "ok": False,
+            "error": "%s missing. Add it to .env." % meta["env_key"],
+            "reply": "",
+            "tools": [],
+            "provider": provider,
+        }
+
+    model = allowed(provider, model)
+    messages = [{"role": "system", "content": build_system()}]
+    for turn in (history or [])[-16:]:
+        role = "user" if turn.get("role") == "user" else "assistant"
+        messages.append({"role": role, "content": turn.get("content", "")})
+    messages.append({"role": "user", "content": message})
+
+    url = meta["base"].rstrip("/") + "/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer %s" % key,
+    }
+    tool_trace = []
+    reply = ""
+
+    for _ in range(6):
+        body = {
+            "model": model,
+            "messages": messages,
+            "tools": openai_tools(),
+            "tool_choice": "auto",
+        }
+        try:
+            data = _http_json(url, body, headers, timeout=90)
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")[:800]
+            return {
+                "ok": False,
+                "error": "%s HTTP %s: %s" % (provider, e.code, err),
+                "reply": "",
+                "tools": tool_trace,
+                "model": model,
+                "provider": provider,
+            }
+        except Exception as e:  # noqa: BLE001
+            return {
+                "ok": False,
+                "error": str(e),
+                "reply": "",
+                "tools": tool_trace,
+                "model": model,
+                "provider": provider,
+            }
+
+        choice = (data.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        tool_calls = msg.get("tool_calls") or []
+        content = msg.get("content") or ""
+
+        if not tool_calls:
+            reply = (content or "").strip() or "(No text)"
+            break
+
+        # Append assistant turn (with tool_calls)
+        messages.append(
+            {
+                "role": "assistant",
+                "content": content if content else None,
+                "tool_calls": tool_calls,
+            }
+        )
+        for tc in tool_calls:
+            fn = tc.get("function") or {}
+            name = fn.get("name") or ""
+            raw_args = fn.get("arguments") or "{}"
+            try:
+                args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+            except json.JSONDecodeError:
+                args = {}
+            result = dispatch(name, args)
+            tool_trace.append({"name": name, "args": args, "result": result})
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.get("id") or name,
+                    "content": json.dumps(result),
+                }
+            )
+    else:
+        reply = reply or "Stopped after too many tool steps."
+
+    return {"ok": True, "reply": reply, "tools": tool_trace, "model": model, "provider": provider}
+
+
+def anthropic_chat(message, model, history):
+    meta = PROVIDERS["anthropic"]
+    key = provider_key("anthropic")
+    if not key:
+        return {
+            "ok": False,
+            "error": "ANTHROPIC_API_KEY missing. Add it to .env.",
+            "reply": "",
+            "tools": [],
+            "provider": "anthropic",
+        }
+
+    model = allowed("anthropic", model)
+    messages = []
+    for turn in (history or [])[-16:]:
+        role = "user" if turn.get("role") == "user" else "assistant"
+        messages.append({"role": role, "content": turn.get("content", "")})
+    messages.append({"role": "user", "content": message})
+
+    url = meta["base"].rstrip("/") + "/messages"
+    headers = {
+        "Content-Type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+    }
+    tool_trace = []
+    reply = ""
+    system = build_system()
+
+    for _ in range(6):
+        body = {
+            "model": model,
+            "max_tokens": 4096,
+            "system": system,
+            "messages": messages,
+            "tools": anthropic_tools(),
+        }
+        try:
+            data = _http_json(url, body, headers, timeout=90)
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")[:800]
+            return {
+                "ok": False,
+                "error": "Anthropic HTTP %s: %s" % (e.code, err),
+                "reply": "",
+                "tools": tool_trace,
+                "model": model,
+                "provider": "anthropic",
+            }
+        except Exception as e:  # noqa: BLE001
+            return {
+                "ok": False,
+                "error": str(e),
+                "reply": "",
+                "tools": tool_trace,
+                "model": model,
+                "provider": "anthropic",
+            }
+
+        content_blocks = data.get("content") or []
+        tool_uses = [b for b in content_blocks if isinstance(b, dict) and b.get("type") == "tool_use"]
+        texts = [
+            b.get("text", "")
+            for b in content_blocks
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+
+        if not tool_uses:
+            reply = "\n".join(texts).strip() or "(No text)"
+            break
+
+        messages.append({"role": "assistant", "content": content_blocks})
+        result_blocks = []
+        for tu in tool_uses:
+            name = tu.get("name") or ""
+            args = tu.get("input") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            result = dispatch(name, args)
+            tool_trace.append({"name": name, "args": args, "result": result})
+            result_blocks.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tu.get("id") or name,
+                    "content": json.dumps(result),
+                }
+            )
+        messages.append({"role": "user", "content": result_blocks})
+    else:
+        reply = reply or "Stopped after too many tool steps."
+
+    return {
+        "ok": True,
+        "reply": reply,
+        "tools": tool_trace,
+        "model": model,
+        "provider": "anthropic",
+    }
+
+
+def run_chat(message, provider=None, model=None, history=None):
+    provider = (provider or default_provider() or DEFAULT_PROVIDER).lower().strip()
+    if provider not in PROVIDERS:
+        return {
+            "ok": False,
+            "error": "Unknown provider %r. Use one of: %s" % (provider, ", ".join(PROVIDERS)),
+            "reply": "",
+            "tools": [],
+        }
+    meta = PROVIDERS[provider]
+    kind = meta["kind"]
+    if kind == "gemini":
+        return gemini_chat(message, model, history)
+    if kind == "openai":
+        return openai_compat_chat(provider, message, model, history)
+    if kind == "anthropic":
+        return anthropic_chat(message, model, history)
+    return {"ok": False, "error": "Unsupported provider kind", "reply": "", "tools": []}
 
 
 HTML = r"""<!DOCTYPE html>
@@ -763,7 +1123,7 @@ h1{font-size:1.05rem;margin:0}
 label{font-size:.75rem;color:#9aa8bc;display:block}
 select,button,textarea,input[type=file]{font:inherit;border-radius:8px;border:1px solid #2a3548;background:#0c1118;color:#e7ecf3}
 select{padding:6px 8px}
-#status{font-size:.8rem;color:#9aa8bc;max-width:280px}
+#status{font-size:.8rem;color:#9aa8bc;max-width:320px}
 #status.ok{color:#6ee7b7}#status.bad{color:#f87171}
 #note{font-size:.75rem;color:#fbbf24;padding:0 16px;min-height:0}
 #confirm{display:none;padding:10px 16px;background:#3a2a12;border-bottom:1px solid #5a4020;gap:8px;flex-wrap:wrap;align-items:center}
@@ -786,6 +1146,9 @@ button:disabled{opacity:.5}
 <header>
   <h1>AI Agent</h1>
   <div class="controls">
+    <div><label>Provider</label>
+      <select id="provider"></select>
+    </div>
     <div><label>Category</label>
       <select id="tier"><option value="free" selected>Free</option><option value="paid">Paid</option></select>
     </div>
@@ -805,14 +1168,39 @@ button:disabled{opacity:.5}
   <button id="send">Send</button>
 </form>
 <script>
-const log=document.getElementById('log'),tier=document.getElementById('tier'),model=document.getElementById('model');
+const log=document.getElementById('log'),provider=document.getElementById('provider');
+const tier=document.getElementById('tier'),model=document.getElementById('model');
 const status=document.getElementById('status'),input=document.getElementById('input'),send=document.getElementById('send');
 const note=document.getElementById('note'),confirmBar=document.getElementById('confirm'),pendingCmd=document.getElementById('pendingCmd');
 const fileInput=document.getElementById('file');
-let catalog={free:[],paid:[],default:'gemini-2.0-flash'}, history=[];
-function fill(){const list=catalog[tier.value]||[]; model.innerHTML='';
+let catalog={providers:{},default_provider:'gemini',default_model:'gemini-2.0-flash'}, history=[], keys={};
+function fillProviders(){
+  provider.innerHTML='';
+  Object.keys(catalog.providers||{}).forEach(pid=>{
+    const o=document.createElement('option'); o.value=pid; o.textContent=pid; provider.appendChild(o);
+  });
+  const sp=localStorage.getItem('p');
+  if(sp && catalog.providers[sp]) provider.value=sp;
+  else if(catalog.default_provider && catalog.providers[catalog.default_provider]) provider.value=catalog.default_provider;
+}
+function fillModels(){
+  const p=catalog.providers[provider.value]||{free:[],paid:[]};
+  const list=p[tier.value]||[];
+  model.innerHTML='';
   list.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;model.appendChild(o);});
-  const s=localStorage.getItem('m'); if(s&&list.includes(s)) model.value=s; else if(list.includes(catalog.default)) model.value=catalog.default; else if(list[0]) model.value=list[0];
+  const key='m:'+provider.value;
+  const s=localStorage.getItem(key);
+  const def=catalog.default_model;
+  if(s&&list.includes(s)) model.value=s;
+  else if(provider.value===catalog.default_provider && list.includes(def)) model.value=def;
+  else if(list[0]) model.value=list[0];
+}
+function updateStatus(){
+  const pid=provider.value;
+  const has=!!keys[pid];
+  const wsLabel=(window._ws||'').replace(/^.*\//,'…/');
+  status.textContent=(has?(pid+' key OK'):(pid+' key missing — edit .env'))+' · v'+(window._ver||'?')+' · '+wsLabel;
+  status.className=has?'ok':'bad';
 }
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function add(role,text,tools){const d=document.createElement('div'); d.className='msg '+(role==='user'?'user':'bot'); d.textContent=text;
@@ -820,7 +1208,6 @@ function add(role,text,tools){const d=document.createElement('div'); d.className
     const names=[]; tools.forEach(t=>{const r=t.result||{}; const n=r.name||(r.path&&String(r.path).split('/').pop()); if(n&&(t.name==='write_file'||r.path)) names.push(n);});
     if(names.length){const dl=document.createElement('div'); dl.className='dl'; dl.innerHTML=names.map(n=>'<a href="/api/download?name='+encodeURIComponent(n)+'" download>'+esc(n)+'</a>').join(' · '); d.appendChild(dl);}
   }
-  // Link pattern: [[download:filename]]
   if(role!=='user' && text && text.indexOf('[[download:')>=0){
     const dl=document.createElement('div'); dl.className='dl';
     const re=/\[\[download:([^\]]+)\]\]/g; let m; const seen={};
@@ -838,20 +1225,24 @@ async function refreshPending(){
 async function boot(){
   try{
     const h=await fetch('/api/health').then(r=>r.json());
-    const ws=(h.workspace||'').replace(/^.*\//,'…/');
-    status.textContent=(h.api_key_set?'API key OK':'API key missing — edit .env')+' · v'+(h.version||'?')+' · '+ws;
-    status.className=h.api_key_set?'ok':'bad';
+    keys=h.keys||{};
+    window._ws=h.workspace||'';
+    window._ver=h.version||'?';
     if(h.due_reminders&&h.due_reminders.length){
       note.textContent='Due reminders: '+h.due_reminders.map(r=>r.text).join('; ');
     } else note.textContent='';
     const m=await fetch('/api/models').then(r=>r.json());
-    catalog={free:m.categories.free,paid:m.categories.paid,default:m.default};
-    const t=localStorage.getItem('t'); if(t==='paid'||t==='free') tier.value=t; fill();
+    catalog={providers:m.providers||{},default_provider:m.default_provider||'gemini',default_model:m.default_model||''};
+    fillProviders();
+    const t=localStorage.getItem('t'); if(t==='paid'||t==='free') tier.value=t;
+    fillModels();
+    updateStatus();
     await refreshPending();
   }catch(e){status.textContent='Cannot reach server'; status.className='bad';}
 }
-tier.onchange=()=>{localStorage.setItem('t',tier.value); fill();};
-model.onchange=()=>localStorage.setItem('m',model.value);
+provider.onchange=()=>{localStorage.setItem('p',provider.value); fillModels(); updateStatus();};
+tier.onchange=()=>{localStorage.setItem('t',tier.value); fillModels();};
+model.onchange=()=>localStorage.setItem('m:'+provider.value,model.value);
 document.getElementById('btnConfirm').onclick=async()=>{
   const res=await fetch('/api/confirm',{method:'POST'}).then(r=>r.json());
   add('bot', res.ok?('Shell OK (exit '+(res.exit_code??'?')+'):\n'+(res.stdout||'')+(res.stderr?('\n'+res.stderr):'')):(res.error||'Confirm failed'));
@@ -889,7 +1280,7 @@ document.getElementById('f').onsubmit=async ev=>{
   add('user',message); input.value=''; send.disabled=true;
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message,model:model.value,history})});
+      body:JSON.stringify({message,provider:provider.value,model:model.value,history})});
     const data=await res.json();
     if(!data.ok) add('bot', data.error||'Failed', data.tools); else {
       add('bot', data.reply, data.tools);
@@ -898,12 +1289,15 @@ document.getElementById('f').onsubmit=async ev=>{
     }
     await refreshPending();
     const h=await fetch('/api/health').then(r=>r.json());
+    keys=h.keys||keys;
+    updateStatus();
     if(h.due_reminders&&h.due_reminders.length) note.textContent='Due reminders: '+h.due_reminders.map(r=>r.text).join('; ');
   }catch(e){add('bot','Network error: '+e);} finally{send.disabled=false; input.focus();}
 };
 boot();
 setInterval(refreshPending, 4000);
 setInterval(async()=>{try{const h=await fetch('/api/health').then(r=>r.json());
+  keys=h.keys||keys; updateStatus();
   if(h.due_reminders&&h.due_reminders.length) note.textContent='Due reminders: '+h.due_reminders.map(r=>r.text).join('; ');
   else if(note.textContent.startsWith('Due reminders:')) note.textContent='';
 }catch(e){}}, 15000);
@@ -934,26 +1328,37 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/health":
             rem = tool_reminder_list()
             due = rem.get("due") or []
+            keys = keys_status()
             self._json(
                 200,
                 {
                     "ok": True,
-                    "api_key_set": bool(api_key()),
+                    "keys": keys,
+                    "api_key_set": any(keys.values()),
                     "workspace": str(WORKSPACE),
                     "pending_shell": PENDING_SHELL.exists(),
                     "version": app_version(),
                     "host": HOST,
                     "port": PORT,
-                    "due_reminders": [{"id": r.get("id"), "text": r.get("text"), "due": r.get("due")} for r in due],
+                    "default_provider": default_provider(),
+                    "due_reminders": [
+                        {"id": r.get("id"), "text": r.get("text"), "due": r.get("due")} for r in due
+                    ],
                 },
             )
             return
         if path == "/api/models":
+            providers = {
+                pid: {"free": list(meta["free"]), "paid": list(meta["paid"])}
+                for pid, meta in PROVIDERS.items()
+            }
+            dp = default_provider()
             self._json(
                 200,
                 {
-                    "categories": {"free": FREE_MODELS, "paid": PAID_MODELS},
-                    "default": allowed(default_model()),
+                    "providers": providers,
+                    "default_provider": dp,
+                    "default_model": default_model(dp),
                 },
             )
             return
@@ -1039,7 +1444,12 @@ class Handler(BaseHTTPRequestHandler):
         if not message:
             self._json(400, {"ok": False, "error": "message required"})
             return
-        result = gemini_chat(message, data.get("model"), data.get("history") or [])
+        result = run_chat(
+            message,
+            provider=data.get("provider"),
+            model=data.get("model"),
+            history=data.get("history") or [],
+        )
         self._json(200 if result.get("ok") else 400, result)
 
 
@@ -1060,12 +1470,13 @@ def _lan_ips():
 def main():
     ensure_ws()
     if not ENV_PATH.exists() and (ROOT / ".env.example").exists():
-        print("Tip: copy .env.example to .env and add GEMINI_API_KEY")
+        print("Tip: copy .env.example to .env and add provider API keys")
     t = threading.Thread(target=background_loop, name="reminders-jobs", daemon=True)
     t.start()
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print("debian-ai-agent v%s" % app_version())
     print("Workspace: %s" % WORKSPACE)
+    print("Default provider: %s" % default_provider())
     print("Open http://%s:%s  (Ctrl+C to stop)" % (HOST if HOST != "0.0.0.0" else "127.0.0.1", PORT))
     if HOST == "0.0.0.0":
         tips = _lan_ips()
@@ -1073,8 +1484,12 @@ def main():
         for ip in tips:
             print("  e.g. http://%s:%s" % (ip, PORT))
         print("(Same WiFi; firewall may need to allow TCP %s)" % PORT)
-    if not api_key():
-        print("WARNING: GEMINI_API_KEY not set in .env yet")
+    keys = keys_status()
+    if not any(keys.values()):
+        print("WARNING: no provider API keys set in .env yet")
+    else:
+        set_names = [k for k, v in keys.items() if v]
+        print("Keys set: %s" % ", ".join(set_names))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
