@@ -29,8 +29,41 @@ if sys.version_info < (3, 8):
     sys.exit(1)
 
 ROOT = Path(__file__).resolve().parent
-WORKSPACE = ROOT / "agent-workspace"
+
+def app_version():
+    vp = ROOT / "VERSION"
+    if vp.exists():
+        return vp.read_text(encoding="utf-8").strip() or "0.0.0"
+    return "0.0.0"
+
 ENV_PATH = ROOT / ".env"
+
+
+def _read_dotenv():
+    env = {}
+    if not ENV_PATH.exists():
+        return env
+    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        env[k.strip()] = v.strip().strip('"').strip("'")
+    return env
+
+
+def _workspace_path():
+    raw = (_read_dotenv().get("WORKSPACE") or "").strip()
+    if raw:
+        import os
+        raw = os.path.expandvars(raw)  # supports $USER, $HOME
+        return Path(raw).expanduser()
+    return Path.home() / "ai-agent"
+
+
+WORKSPACE = _workspace_path()
+MEMORY_FILE = WORKSPACE / "memory.md"
+PENDING_SHELL = WORKSPACE / ".pending_shell.json"
 HOST, PORT = "127.0.0.1", 8787
 
 FREE_MODELS = [
@@ -51,8 +84,10 @@ BLOCKED = re.compile(
 
 SYSTEM = (
     "You are a helpful agent on the user's Linux PC. "
-    "You may use tools to list/read/write files and run shell commands "
-    "inside the workspace folder. Keep answers short and clear."
+    "Workspace tools: list/read/write files, memory_read/memory_append, run_shell. "
+    "Shell commands need the user to confirm in the UI — if run_shell returns needs_confirm, "
+    "tell them briefly what you want to run and wait. "
+    "Use memory_append for lasting notes. Keep answers short."
 )
 
 HTML = r"""<!DOCTYPE html>
@@ -134,16 +169,7 @@ boot();
 
 
 def load_env():
-    out = {}  # type: Dict[str, str]
-    if not ENV_PATH.exists():
-        return out
-    for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        out[k.strip()] = v.strip().strip('"').strip("'")
-    return out
+    return _read_dotenv()
 
 
 def api_key() -> str:
@@ -162,8 +188,32 @@ def allowed(model):
     return d if d in all_m else FREE_MODELS[0]
 
 
-def ensure_ws() -> None:
+def ensure_ws():
     WORKSPACE.mkdir(parents=True, exist_ok=True)
+
+
+def memory_load():
+    ensure_ws()
+    if not MEMORY_FILE.exists():
+        return ""
+    return MEMORY_FILE.read_text(encoding="utf-8")[:20000]
+
+
+def memory_save(text):
+    ensure_ws()
+    MEMORY_FILE.write_text(text or "", encoding="utf-8")
+    return {"ok": True, "path": str(MEMORY_FILE), "bytes": len((text or "").encode("utf-8"))}
+
+
+def memory_append(note):
+    ensure_ws()
+    cur = memory_load()
+    add = (note or "").strip()
+    if not add:
+        return {"ok": False, "error": "Empty note"}
+    sep = "\n" if cur and not cur.endswith("\n") else ""
+    memory_save(cur + sep + add + "\n")
+    return {"ok": True, "path": str(MEMORY_FILE)}
 
 
 def safe_path(user_path: str) -> Path:
@@ -202,13 +252,7 @@ def tool_write_file(path: str, content: str) -> dict:
     return {"ok": True, "path": str(t)}
 
 
-def tool_run_shell(command: str) -> dict:
-    ensure_ws()
-    cmd = (command or "").strip()
-    if not cmd:
-        return {"ok": False, "error": "Empty command"}
-    if BLOCKED.search(cmd) or cmd.startswith("sudo"):
-        return {"ok": False, "error": "Command blocked for safety"}
+def _shell_execute(cmd):
     try:
         p = subprocess.run(
             cmd, shell=True, cwd=str(WORKSPACE), capture_output=True, text=True, timeout=30
@@ -218,9 +262,46 @@ def tool_run_shell(command: str) -> dict:
             "exit_code": p.returncode,
             "stdout": p.stdout[-40000:],
             "stderr": p.stderr[-10000:],
+            "command": cmd,
         }
     except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "Timed out"}
+        return {"ok": False, "error": "Timed out", "command": cmd}
+
+
+def tool_run_shell(command, confirmed=False):
+    """Queue shell for user confirm unless confirmed=True."""
+    ensure_ws()
+    cmd = (command or "").strip()
+    if not cmd:
+        return {"ok": False, "error": "Empty command"}
+    if BLOCKED.search(cmd) or cmd.startswith("sudo"):
+        return {"ok": False, "error": "Command blocked for safety"}
+    if not confirmed:
+        PENDING_SHELL.write_text(json.dumps({"command": cmd}), encoding="utf-8")
+        return {
+            "ok": False,
+            "needs_confirm": True,
+            "command": cmd,
+            "error": "Waiting for user confirm in the UI",
+        }
+    if PENDING_SHELL.exists():
+        PENDING_SHELL.unlink()
+    return _shell_execute(cmd)
+
+
+def confirm_pending_shell():
+    ensure_ws()
+    if not PENDING_SHELL.exists():
+        return {"ok": False, "error": "Nothing to confirm"}
+    data = json.loads(PENDING_SHELL.read_text(encoding="utf-8"))
+    cmd = data.get("command") or ""
+    return tool_run_shell(cmd, confirmed=True)
+
+
+def cancel_pending_shell():
+    if PENDING_SHELL.exists():
+        PENDING_SHELL.unlink()
+    return {"ok": True, "cancelled": True}
 
 
 TOOLS = {
@@ -256,11 +337,25 @@ TOOL_DECLS = [
     },
     {
         "name": "run_shell",
-        "description": "Run a shell command with cwd=workspace (no sudo)",
+        "description": "Propose a shell command (cwd=workspace). User must confirm in UI before it runs.",
         "parameters": {
             "type": "object",
             "properties": {"command": {"type": "string"}},
             "required": ["command"],
+        },
+    },
+    {
+        "name": "memory_read",
+        "description": "Read long-term memory notes for this user",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "memory_append",
+        "description": "Append a lasting note to memory",
+        "parameters": {
+            "type": "object",
+            "properties": {"note": {"type": "string"}},
+            "required": ["note"],
         },
     },
 ]
@@ -276,9 +371,13 @@ def dispatch(name, args):
             return tool_write_file(args["path"], args.get("content", ""))
         if name == "run_shell":
             return tool_run_shell(args["command"])
-        return {"ok": False, "error": f"Unknown tool {name}"}
+        if name == "memory_read":
+            return {"ok": True, "memory": memory_load()}
+        if name == "memory_append":
+            return memory_append(args.get("note") or "")
+        return {"ok": False, "error": "Unknown tool %s" % name}
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}
 
 
 def gemini_chat(message, model, history):
@@ -371,7 +470,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
             return
         if path == "/api/health":
-            self._json(200, {"ok": True, "api_key_set": bool(api_key()), "workspace": str(WORKSPACE)})
+            self._json(200, {"ok": True, "api_key_set": bool(api_key()), "workspace": str(WORKSPACE), "pending_shell": PENDING_SHELL.exists(), "version": app_version()})
             return
         if path == "/api/models":
             self._json(
@@ -382,17 +481,67 @@ class Handler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if path == "/api/download":
+            from urllib.parse import parse_qs, urlparse
+            qs = parse_qs(urlparse(self.path).query)
+            name = Path((qs.get("name") or [""])[0]).name
+            if not name:
+                self._json(400, {"ok": False, "error": "name required"})
+                return
+            try:
+                target = safe_path(name)
+            except PermissionError as e:
+                self._json(403, {"ok": False, "error": str(e)})
+                return
+            if not target.is_file():
+                self._json(404, {"ok": False, "error": "file not found"})
+                return
+            data = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if path == "/api/pending":
+            if PENDING_SHELL.exists():
+                self._json(200, json.loads(PENDING_SHELL.read_text(encoding="utf-8")))
+            else:
+                self._json(200, {"command": None})
+            return
         self._json(404, {"ok": False, "error": "Not found"})
 
     def do_POST(self):  # noqa: N802
         path = self.path.split("?", 1)[0]
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+
+        if path == "/api/confirm":
+            self._json(200, confirm_pending_shell())
+            return
+        if path == "/api/cancel":
+            self._json(200, cancel_pending_shell())
+            return
+        if path == "/api/upload":
+            # JSON: { "name": "file.txt", "content": "..." } text uploads for v1
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self._json(400, {"ok": False, "error": "Invalid JSON"})
+                return
+            name = Path(data.get("name") or "").name
+            if not name:
+                self._json(400, {"ok": False, "error": "name required"})
+                return
+            result = tool_write_file(name, data.get("content") or "")
+            self._json(200 if result.get("ok") else 400, result)
+            return
         if path != "/api/chat":
             self._json(404, {"ok": False, "error": "Not found"})
             return
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(length) if length else b"{}"
         try:
-            data = json.loads(raw.decode("utf-8"))
+            data = json.loads(raw.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             self._json(400, {"ok": False, "error": "Invalid JSON"})
             return
@@ -409,6 +558,7 @@ def main():
     if not ENV_PATH.exists() and (ROOT / ".env.example").exists():
         print("Tip: copy .env.example to .env and add GEMINI_API_KEY")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
+    print("debian-ai-agent v%s" % app_version())
     print(f"Open http://{HOST}:{PORT}  (Ctrl+C to stop)")
     if not api_key():
         print("WARNING: GEMINI_API_KEY not set in .env yet")

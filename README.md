@@ -1,5 +1,7 @@
 # Debian AI Agent
 
+Version: see `VERSION` (patch bumps each feature release).
+
 Chat with Gemini in your browser. Can use files/commands inside a safe folder.
 
 **Needs:** Python 3.8+ only (`./run.sh` finds it).  
@@ -8,7 +10,7 @@ Chat with Gemini in your browser. Can use files/commands inside a safe folder.
 ## Setup
 
 1. Get a key: https://aistudio.google.com/apikey  
-2. `cp .env.example .env` → put `GEMINI_API_KEY=...` in `.env`  
+2. `cp .env.example .env` → set `GEMINI_API_KEY=...` (folder `/home/$USER/ai-agent`)  
 3. `./run.sh` (or `python3 run.py`)  
 4. Open http://127.0.0.1:8787  
 
@@ -21,7 +23,7 @@ Stop with Ctrl+C.
 ## Notes
 
 - Key stays in `.env`, not in the webpage.  
-- Tools stay in `agent-workspace/`.  
+- Tools stay in `/home/$USER/ai-agent` by default (`WORKSPACE=` in `.env` to override).  
 - Listens on this PC only (`127.0.0.1`).
 
 If `./run.sh` fails: `sudo apt install python3` then try again.
