@@ -2,8 +2,13 @@
 
 Version: see `VERSION`.
 
-Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek).  
-Python 3.8+ only — no pip, Apache, Node, or local model.
+Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek).
+
+## Dependencies
+
+- Python **3.8+** (`python3`)
+- `git`
+- At least one provider API key (see below)
 
 ## Install
 
