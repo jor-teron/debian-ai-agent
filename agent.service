@@ -1,0 +1,14 @@
+[Unit]
+Description=Debian AI Agent (local chat)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/debian-ai-agent
+ExecStart=%h/debian-ai-agent/run.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

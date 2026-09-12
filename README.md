@@ -1,105 +1,36 @@
-# Debian AI Agent (simple)
+# Debian AI Agent
 
-Chat with Gemini in your browser. The app can also work with files and shell commands inside a safe folder.
+Chat with Gemini in your browser. Can use files/commands inside a safe folder.
 
-**Needs:** Python **3.8+** (the normal `python3` on Debian/Ubuntu/Raspberry Pi, Windows, macOS). Stdlib only — no special Python flavor.  
-**Does not need:** Apache, Node, Docker, pip, or a local AI model.
+**Needs:** Python 3.8+ only (`./run.sh` finds it).  
+**No:** Apache, pip, Node, or a local AI model.
 
----
+## Setup
 
-## 1. Get a free API key
+1. Get a key: https://aistudio.google.com/apikey  
+2. `cp .env.example .env` → put `GEMINI_API_KEY=...` in `.env`  
+3. `./run.sh` (or `python3 run.py`)  
+4. Open http://127.0.0.1:8787  
 
-1. Open https://aistudio.google.com/apikey  
-2. Sign in with Google  
-3. Create an API key and copy it  
-4. Do **not** share the key in chats or on GitHub  
+Stop with Ctrl+C.
 
-## 2. Setup (one time)
+## Models
 
-```bash
-cd debian-ai-agent
-cp .env.example .env
-nano .env
-```
+**Free** (default) or **Paid** in the page. Same key; Paid needs Google access for Pro models.
 
-Put your key on this line:
+## Notes
 
-```
-GEMINI_API_KEY=paste_your_key_here
-```
+- Key stays in `.env`, not in the webpage.  
+- Tools stay in `agent-workspace/`.  
+- Listens on this PC only (`127.0.0.1`).
 
-Save and exit (`Ctrl+O`, Enter, `Ctrl+X` in nano).
+If `./run.sh` fails: `sudo apt install python3` then try again.
 
-## 3. Run
+## Background + start at boot
 
 ```bash
-./run.sh
-# or: python3 run.py
+./enable-boot.sh
 ```
 
-## Which `python` command?
-
-Some PCs have confusing names: `python`, `python2`, `python3`, `python3ispython`, …
-
-**Easiest:** from this folder run:
-
-```bash
-./run.sh
-```
-
-That script picks a real **Python 3.8+** for you.
-
-Or run explicitly:
-
-```bash
-python3 run.py
-```
-
-| If this happens | Do this |
-|-----------------|--------|
-| `python` opens Python 2 | Use `python3` or `./run.sh` |
-| `python3: command not found` | Debian/Ubuntu: `sudo apt install python3` |
-| Several versions installed | Prefer `./run.sh` — it checks the version |
-| Windows | Install Python 3 from python.org, tick “Add to PATH”, then `py -3 run.py` or `python run.py` |
-
-Check what you have:
-
-```bash
-python3 --version
-# or
-./run.sh
-```
-
-
-
-Open in your browser: **http://127.0.0.1:8787**
-
-Stop the app with `Ctrl+C` in the terminal.
-
----
-
-## Free vs Paid models
-
-In the webpage, pick **Free** (default, Flash) or **Paid** (Pro).  
-Same API key — Paid only works if your Google project allows those models.
-
----
-
-## Safety
-
-- Files/commands stay inside `agent-workspace/` next to this app (unless you change that in code later).
-- Only listens on your own computer (`127.0.0.1`), not the whole Wi‑Fi.
-- Your API key stays in `.env` on the PC, not in the webpage.
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|--------|-----|
-| “API key missing” | Edit `.env`, save, run `python3 run.py` again |
-| Browser can’t connect | Make sure `python3 run.py` is still running |
-| Paid model error | Switch the UI back to **Free** |
-| `Need Python 3.8+` | Install/update Python 3, then run `python3 --version` |
-
-That’s it.
+Runs behind the scenes and starts after you log in.  
+Stop: `systemctl --user stop debian-ai-agent`
