@@ -4,15 +4,13 @@
 - Chat (Gemini Free / Paid)
 - Files + shell in `/home/$USER/ai-agent`
 - Background + start at login
-
-## Next
-1. Memory — remember notes between chats  
-2. Confirm before shell commands  
-3. Upload / download files in the page  
-4. Web search — via Gemini Google Search (same API key)  
-5. Reminders on the PC  
-6. Simple scheduled jobs (e.g. daily folder summary)  
-8. Phone access (Android via LAN or chat app)
+- Memory — `memory.md`; tools + injected into system prompt
+- Confirm before shell — UI Confirm/Cancel
+- Upload / download in the page
+- Web search — Gemini Google Search tool (`web_search`)
+- Reminders — `reminders.json`, notify-send, `/api/reminders`
+- Scheduled jobs — `jobs.json` → `jobs_log.md`
+- Phone/LAN — `HOST=0.0.0.0` in `.env`
 
 ## Later
-7. Command allow-list  
+7. Command allow-list

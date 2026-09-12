@@ -1,16 +1,16 @@
 # Debian AI Agent
 
-Version: see `VERSION` (patch bumps each feature release).
+Version: see `VERSION`.
 
-Chat with Gemini in your browser. Can use files/commands inside a safe folder.
+Chat with Gemini in your browser. Files, shell, memory, search, reminders, and jobs — one stdlib Python script.
 
-**Needs:** Python 3.8+ only (`./run.sh` finds it).  
+**Needs:** Python 3.8+ only (`./run.sh`).  
 **No:** Apache, pip, Node, or a local AI model.
 
 ## Setup
 
 1. Get a key: https://aistudio.google.com/apikey  
-2. `cp .env.example .env` → set `GEMINI_API_KEY=...` (folder `/home/$USER/ai-agent`)  
+2. `cp .env.example .env` → set `GEMINI_API_KEY=...`  
 3. `./run.sh` (or `python3 run.py`)  
 4. Open http://127.0.0.1:8787  
 
@@ -22,9 +22,12 @@ Stop with Ctrl+C.
 
 ## Notes
 
-- Key stays in `.env`, not in the webpage.  
-- Tools stay in `/home/$USER/ai-agent` by default (`WORKSPACE=` in `.env` to override).  
-- Listens on this PC only (`127.0.0.1`).
+- Key stays in `.env`, never in the browser.  
+- Workspace: `/home/$USER/ai-agent` (`WORKSPACE=` in `.env`).  
+- Shell needs Confirm/Cancel in the UI.  
+- Upload via file picker; download `/api/download?name=…`.  
+- Reminders use `notify-send` when due; jobs append to `jobs_log.md`.  
+- Set `HOST=0.0.0.0` to open from phone on same WiFi.
 
 If `./run.sh` fails: `sudo apt install python3` then try again.
 
@@ -34,5 +37,4 @@ If `./run.sh` fails: `sudo apt install python3` then try again.
 ./enable-boot.sh
 ```
 
-Runs behind the scenes and starts after you log in.  
-Stop: `systemctl --user stop debian-ai-agent`
+Runs in the background after login. Stop: `systemctl --user stop debian-ai-agent`
