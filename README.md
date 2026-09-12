@@ -33,8 +33,44 @@ Save and exit (`Ctrl+O`, Enter, `Ctrl+X` in nano).
 ## 3. Run
 
 ```bash
+./run.sh
+# or: python3 run.py
+```
+
+## Which `python` command?
+
+Some PCs have confusing names: `python`, `python2`, `python3`, `python3ispython`, …
+
+**Easiest:** from this folder run:
+
+```bash
+./run.sh
+```
+
+That script picks a real **Python 3.8+** for you.
+
+Or run explicitly:
+
+```bash
 python3 run.py
 ```
+
+| If this happens | Do this |
+|-----------------|--------|
+| `python` opens Python 2 | Use `python3` or `./run.sh` |
+| `python3: command not found` | Debian/Ubuntu: `sudo apt install python3` |
+| Several versions installed | Prefer `./run.sh` — it checks the version |
+| Windows | Install Python 3 from python.org, tick “Add to PATH”, then `py -3 run.py` or `python run.py` |
+
+Check what you have:
+
+```bash
+python3 --version
+# or
+./run.sh
+```
+
+
 
 Open in your browser: **http://127.0.0.1:8787**
 

@@ -18,6 +18,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Refuse Python 2 / ancient 3.x early (clear message for mixed systems)
+if sys.version_info[0] < 3:
+    sys.stderr.write("This app needs Python 3. You ran Python %s.\n" % sys.version.split()[0])
+    sys.stderr.write("Try:  python3 run.py   or   ./run.sh\n")
+    sys.exit(1)
+if sys.version_info < (3, 8):
+    sys.stderr.write("Need Python 3.8+. You have %s\n" % sys.version.split()[0])
+    sys.stderr.write("Try:  python3 run.py   or   ./run.sh\n")
+    sys.exit(1)
+
 ROOT = Path(__file__).resolve().parent
 WORKSPACE = ROOT / "agent-workspace"
 ENV_PATH = ROOT / ".env"
@@ -395,9 +405,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    if sys.version_info < (3, 8):
-        sys.stderr.write("Need Python 3.8+. You have %s\n" % sys.version.split()[0])
-        sys.exit(1)
     ensure_ws()
     if not ENV_PATH.exists() and (ROOT / ".env.example").exists():
         print("Tip: copy .env.example to .env and add GEMINI_API_KEY")
