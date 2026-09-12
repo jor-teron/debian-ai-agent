@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Debian AI Agent</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e7ecf3;
+      --muted: #9aa8bc;
+      --accent: #5b9dff;
+      --user: #243247;
+      --bot: #1e2a3a;
+      --chip: #2a3a52;
+      --danger: #ff7b7b;
+      --ok: #6bcf8e;
+      --border: #2c3a4f;
+    }
+    [data-theme="light"] {
+      --bg: #f4f6fa;
+      --panel: #ffffff;
+      --text: #1a2332;
+      --muted: #5a6b80;
+      --accent: #2f6fed;
+      --user: #e8eef8;
+      --bot: #f0f3f8;
+      --chip: #e2e8f2;
+      --danger: #c62828;
+      --ok: #2e7d32;
+      --border: #d5dde8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--panel);
+    }
+    header h1 { font-size: 1.05rem; margin: 0; font-weight: 650; }
+    .status { font-size: 0.85rem; color: var(--muted); }
+    .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
+    .status.ok .dot { background: var(--ok); }
+    .status.warn .dot { background: var(--danger); }
+    .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .seg {
+      display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    }
+    .seg button {
+      border: none; background: transparent; color: var(--muted); padding: 6px 12px; cursor: pointer; font: inherit;
+    }
+    .seg button.active { background: var(--accent); color: #fff; font-weight: 600; }
+    select.model {
+      border: 1px solid var(--border); background: var(--bg); color: var(--text);
+      border-radius: 8px; padding: 6px 10px; font: inherit; max-width: 260px;
+    }
+    button.theme {
+      border: 1px solid var(--border); background: transparent; color: var(--text);
+      border-radius: 8px; padding: 6px 10px; cursor: pointer;
+    }
+    #log {
+      flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .msg {
+      max-width: 820px; width: 100%; margin: 0 auto; padding: 12px 14px; border-radius: 12px;
+      line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+    }
+    .msg.user { background: var(--user); align-self: flex-end; }
+    .msg.bot { background: var(--bot); border: 1px solid var(--border); }
+    .msg .role { font-size: 0.75rem; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .chip {
+      font-size: 0.75rem; background: var(--chip); color: var(--text);
+      border-radius: 999px; padding: 4px 10px; border: 1px solid var(--border);
+    }
+    .chip.bad { color: var(--danger); }
+    footer {
+      border-top: 1px solid var(--border); background: var(--panel); padding: 12px 16px;
+    }
+    .composer {
+      max-width: 820px; margin: 0 auto; display: flex; gap: 8px;
+    }
+    textarea {
+      flex: 1; resize: none; min-height: 48px; max-height: 160px;
+      border-radius: 12px; border: 1px solid var(--border); background: var(--bg);
+      color: var(--text); padding: 12px; font: inherit;
+    }
+    button.send {
+      border: none; background: var(--accent); color: white; font-weight: 600;
+      border-radius: 12px; padding: 0 18px; cursor: pointer;
+    }
+    button.send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .banner {
+      max-width: 820px; margin: 12px auto 0; padding: 10px 12px; border-radius: 10px;
+      background: #3a2222; color: #ffd0d0; font-size: 0.9rem; display: none;
+    }
+    [data-theme="light"] .banner { background: #fdecea; color: #8a1f1f; }
+    .banner.show { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Debian AI Agent</h1>
+      <div id="status" class="status"><span class="dot"></span>Checking…</div>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Model category">
+        <button type="button" id="catFree" class="active">Free</button>
+        <button type="button" id="catPaid">Paid</button>
+      </div>
+      <select class="model" id="modelSelect" aria-label="Gemini model"></select>
+      <button class="theme" id="themeBtn" type="button" title="Toggle theme">Theme</button>
+    </div>
+  </header>
+  <div id="banner" class="banner"></div>
+  <div id="log"></div>
+  <footer>
+    <form class="composer" id="form">
+      <textarea id="input" rows="2" placeholder="Ask me to list files, write a note, or run a safe command…"></textarea>
+      <button class="send" id="send" type="submit">Send</button>
+    </form>
+  </footer>
+  <script>
+    const log = document.getElementById('log');
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+    const statusEl = document.getElementById('status');
+    const banner = document.getElementById('banner');
+    const themeBtn = document.getElementById('themeBtn');
+    const modelSelect = document.getElementById('modelSelect');
+    const catFree = document.getElementById('catFree');
+    const catPaid = document.getElementById('catPaid');
+
+    let catalog = { free: [], paid: [], default: 'gemini-3.5-flash-lite' };
+    let category = localStorage.getItem('agentCategory') || 'free';
+    let modelId = localStorage.getItem('agentModel') || '';
+
+    const savedTheme = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    themeBtn.onclick = () => {
+      const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+    };
+
+    function currentModels() {
+      return category === 'paid' ? (catalog.paid || []) : (catalog.free || []);
+    }
+
+    function fillModelSelect() {
+      const list = currentModels();
+      modelSelect.innerHTML = '';
+      list.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.label || m.id;
+        modelSelect.appendChild(opt);
+      });
+      const ids = list.map(m => m.id);
+      if (!ids.includes(modelId)) {
+        modelId = category === 'free' ? (catalog.default || ids[0]) : (ids[0] || catalog.default);
+      }
+      if (ids.includes(modelId)) modelSelect.value = modelId;
+      localStorage.setItem('agentCategory', category);
+      localStorage.setItem('agentModel', modelSelect.value);
+      modelId = modelSelect.value;
+      catFree.classList.toggle('active', category === 'free');
+      catPaid.classList.toggle('active', category === 'paid');
+    }
+
+    catFree.onclick = () => { category = 'free'; fillModelSelect(); };
+    catPaid.onclick = () => { category = 'paid'; fillModelSelect(); };
+    modelSelect.onchange = () => {
+      modelId = modelSelect.value;
+      localStorage.setItem('agentModel', modelId);
+    };
+
+    function addMsg(role, text, traces, meta) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+      const roleEl = document.createElement('div');
+      roleEl.className = 'role';
+      roleEl.textContent = role === 'user' ? 'You' : ('Agent' + (meta ? ' · ' + meta : ''));
+      div.appendChild(roleEl);
+      const body = document.createElement('div');
+      body.textContent = text;
+      div.appendChild(body);
+      if (traces && traces.length) {
+        const chips = document.createElement('div');
+        chips.className = 'chips';
+        traces.forEach(t => {
+          const c = document.createElement('span');
+          const ok = t.result && t.result.ok;
+          c.className = 'chip' + (ok ? '' : ' bad');
+          c.textContent = (ok ? '✓ ' : '✗ ') + t.tool;
+          c.title = JSON.stringify(t, null, 2);
+          chips.appendChild(c);
+        });
+        div.appendChild(chips);
+      }
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    async function loadModels() {
+      try {
+        const r = await fetch('/api/models');
+        catalog = await r.json();
+        if (!modelId) modelId = catalog.default;
+        // If saved model is in the other category, flip category to match.
+        const inFree = (catalog.free || []).some(m => m.id === modelId);
+        const inPaid = (catalog.paid || []).some(m => m.id === modelId);
+        if (inPaid && !inFree) category = 'paid';
+        else if (inFree) category = 'free';
+        fillModelSelect();
+      } catch (e) {
+        fillModelSelect();
+      }
+    }
+
+    async function refreshHealth() {
+      try {
+        const r = await fetch('/api/health');
+        const j = await r.json();
+        if (j.api_key_set) {
+          statusEl.className = 'status ok';
+          statusEl.innerHTML = '<span class="dot"></span>Ready · key set · localhost only';
+          banner.classList.remove('show');
+        } else {
+          statusEl.className = 'status warn';
+          statusEl.innerHTML = '<span class="dot"></span>Running · API key missing';
+          banner.textContent = 'Add your Gemini key to .env (GEMINI_API_KEY=…) then restart ./run.sh. Get a key at https://aistudio.google.com/apikey — Free is default; Paid/Pro models need a key with paid access.';
+          banner.classList.add('show');
+        }
+      } catch (e) {
+        statusEl.className = 'status warn';
+        statusEl.innerHTML = '<span class="dot"></span>Cannot reach server';
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const message = input.value.trim();
+      if (!message) return;
+      addMsg('user', message);
+      input.value = '';
+      send.disabled = true;
+      try {
+        const r = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, model: modelSelect.value }),
+        });
+        const j = await r.json();
+        const meta = [j.category, j.model].filter(Boolean).join(' · ');
+        addMsg('bot', j.reply || j.error || 'No reply', j.tool_traces || [], meta);
+        refreshHealth();
+      } catch (err) {
+        addMsg('bot', 'Network error talking to local server: ' + err);
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    loadModels().then(refreshHealth);
+    addMsg('bot', 'Hi! I am your local agent. Default model category is Free (Flash). Switch to Paid for Pro models if your Gemini key has paid/Pro access. I only listen on this computer and by default only touch /home/user/agent-workspace.');
+  </script>
+</body>
+</html>

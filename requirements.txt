@@ -1,0 +1,5 @@
+# Lean stack: ASGI server + HTTP client + .env — no heavy Gemini SDK
+starlette==0.46.2
+uvicorn==0.34.2
+httpx==0.28.1
+python-dotenv==1.1.0
