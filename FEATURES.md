@@ -9,7 +9,7 @@
   - **xai** — OpenAI-compatible at `https://api.x.ai/v1` (`XAI_API_KEY`); free: `grok-4.3`, `grok-3-mini` (legacy); paid: `grok-4.6`, `grok-4.5` (2026-09 public catalog)
   - **anthropic** — Messages API + tools (`ANTHROPIC_API_KEY`); free: `claude-haiku-4-5`; paid: `claude-sonnet-5`, `claude-sonnet-4-6`
   - **deepseek** — OpenAI-compatible at `https://api.deepseek.com/v1` (`DEEPSEEK_API_KEY`); free: `deepseek-chat`; paid: `deepseek-reasoner`
-- Files + shell in `/home/$USER/ai-agent`
+- Files + shell in `/home/$USER/ai-workspace`
 - Background + start at login
 - Memory — `memory.md`; tools + injected into system prompt
 - Shell sandbox — bubblewrap (`bwrap`) when available: freehand run inside sandbox (workspace RW, tools RO, network on); without bwrap, Confirm / Telegram YES-NO as before; BLOCKED + sudo still refused

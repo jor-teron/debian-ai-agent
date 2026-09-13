@@ -52,12 +52,12 @@ def _read_dotenv():
 
 
 def _workspace_path():
-    """Workspace folder: WORKSPACE from .env, else ~/ai-agent."""
+    """Workspace folder: WORKSPACE from .env, else ~/ai-workspace."""
     raw = (_read_dotenv().get("WORKSPACE") or "").strip()
     if raw:
         raw = os.path.expandvars(raw)  # supports $USER, $HOME
         return Path(raw).expanduser()
-    return Path.home() / "ai-agent"
+    return Path.home() / "ai-workspace"
 
 
 def _host_port():
