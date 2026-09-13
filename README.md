@@ -36,6 +36,8 @@ Open http://127.0.0.1:9191
 
 (`install.sh` is also in the repo if you prefer `git clone` then `./install.sh`.)
 
+To **update** later, run the same install one-liner again (or `./install.sh` inside the folder). Your `.env` is kept.
+
 ## API keys
 
 | Provider | Env var | Get key |

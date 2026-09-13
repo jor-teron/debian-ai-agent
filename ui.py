@@ -92,7 +92,10 @@ let catalog={providers:{},default_provider:'gemini',default_model:'gemini-3.5-fl
 function fillProviders(){
   provider.innerHTML='';
   Object.keys(catalog.providers||{}).forEach(pid=>{
-    const o=document.createElement('option'); o.value=pid; o.textContent=pid; provider.appendChild(o);
+    const o=document.createElement('option'); o.value=pid;
+    const meta=catalog.providers[pid]||{};
+    o.textContent=meta.label||pid;
+    provider.appendChild(o);
   });
   const sp=localStorage.getItem('p');
   if(sp && catalog.providers[sp]) provider.value=sp;
@@ -113,9 +116,15 @@ function fillModels(){
 function updateStatus(){
   const pid=provider.value;
   const has=!!keys[pid];
-  const wsLabel=(window._ws||'').replace(/^.*\//,'…/');
-  status.textContent=(has?'key OK ('+pid+')':('key missing ('+pid+') — edit .env'))+' · v'+(window._ver||'?')+' · '+wsLabel;
-  status.className=has?'ok':'bad';
+  const label=(catalog.providers[pid]&&catalog.providers[pid].label)||pid;
+  const ver=window._ver||'?';
+  if(has){
+    status.textContent='Ready · '+label+' · v'+ver;
+    status.className='ok';
+  }else{
+    status.textContent='No key for '+label+' · v'+ver;
+    status.className='bad';
+  }
 }
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function add(role,text,tools){const d=document.createElement('div'); d.className='msg '+(role==='user'?'user':'bot'); d.textContent=text;

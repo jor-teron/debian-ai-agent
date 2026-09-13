@@ -16,6 +16,8 @@
 - Confirm before shell (fallback when no bwrap); success shows "Done." — sticky amber bar above the text box (Confirm/Cancel)
 - Enter sends; Shift+Enter new line
 - Dark mode by default
+- Status line: Ready · Provider / No key for Provider (human-readable)
+- Update by re-running install.sh (keeps .env)
 - Upload / download in the page
 - Web search — Gemini Google Search tool (`web_search`); needs `GEMINI_API_KEY` even if chatting via another provider
 - Reminders — `reminders.json`, notify-send, `/api/reminders`

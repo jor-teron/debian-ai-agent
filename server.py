@@ -100,7 +100,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/models":
             # Provider catalog for the Provider / Model dropdowns (no free/paid split)
             providers = {
-                pid: {"models": list(meta.get("models") or [])}
+                pid: {
+                    "label": meta.get("label") or pid,
+                    "models": list(meta.get("models") or []),
+                }
                 for pid, meta in PROVIDERS.items()
             }
             dp = default_provider()
