@@ -4,6 +4,8 @@ Version: see `VERSION`.
 
 Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek).
 
+Install page: https://jor-teron.github.io/debian-ai-agent/
+
 ## Dependencies
 
 - Python **3.8+** (`python3`)
@@ -12,21 +14,22 @@ Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek).
 
 ## Install
 
-Copy-paste:
+One line:
 
 ```bash
-sudo apt update && sudo apt install -y python3 git
-git clone https://github.com/jor-teron/debian-ai-agent.git ~/debian-ai-agent
-cd ~/debian-ai-agent
-cp .env.example .env
-nano .env
-# set at least one key, e.g.:
-#   PROVIDER=xai
-#   XAI_API_KEY=your_key_here
-./enable-boot.sh
+curl -fsSL https://raw.githubusercontent.com/jor-teron/debian-ai-agent/main/install.sh | bash
 ```
 
-Then open http://127.0.0.1:8787
+Then edit keys and open the page:
+
+```bash
+nano ~/debian-ai-agent/.env
+systemctl --user restart debian-ai-agent
+```
+
+Open http://127.0.0.1:8787
+
+(`install.sh` is also in the repo if you prefer `git clone` then `./install.sh`.)
 
 ## API keys
 
@@ -42,11 +45,10 @@ In the page: **Provider → Free/Paid → Model**.
 
 ## Notes
 
-- Code is split into `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`; `run.py` is the launcher.  
+- Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`; `run.py` starts it.  
 - Keys only in `.env` (never commit).  
 - Files/tools: `/home/$USER/ai-agent`  
 - Phone on Wi‑Fi: `HOST=0.0.0.0` in `.env`, then restart.  
 - Shell runs need Confirm in the UI.  
-- `web_search` needs a working Gemini key.  
-- Stop service: `systemctl --user stop debian-ai-agent`  
-- Manual run (no boot): `./run.sh`
+- Stop: `systemctl --user stop debian-ai-agent`  
+- Manual run: `./run.sh`

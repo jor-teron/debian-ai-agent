@@ -1,3 +1,4 @@
+- One-line install via `install.sh`
 # Features
 
 ## Now

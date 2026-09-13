@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="color-scheme" content="dark"/>
+  <meta name="theme-color" content="#0f1419"/>
+  <title>Debian AI Agent — install</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: system-ui, sans-serif;
+      background: #0f1419; color: #e7ecf3;
+      display: flex; flex-direction: column; align-items: center;
+      padding: 32px 16px 48px;
+    }
+    main { width: 100%; max-width: 640px; }
+    h1 { font-size: 1.5rem; margin: 0 0 8px; }
+    .sub { color: #9aa8bc; margin: 0 0 28px; line-height: 1.45; }
+    .card {
+      background: #1a2332; border: 1px solid #2a3548;
+      border-radius: 12px; padding: 16px; margin-bottom: 16px;
+    }
+    .card h2 { font-size: 1rem; margin: 0 0 10px; color: #fbbf24; }
+    .cmd {
+      display: block; width: 100%;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .85rem; line-height: 1.4;
+      background: #0c1118; color: #fde68a;
+      border: 1px solid #2a3548; border-radius: 8px;
+      padding: 12px; white-space: pre-wrap; word-break: break-all;
+    }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    button, a.btn {
+      appearance: none; border: none; cursor: pointer;
+      font: inherit; font-weight: 600;
+      padding: 10px 14px; border-radius: 8px;
+      text-decoration: none; display: inline-block;
+      color: #041018; background: #60a5fa;
+    }
+    button.secondary, a.btn.secondary { background: #6ee7b7; }
+    button:active { opacity: .85; }
+    #copied { font-size: .8rem; color: #6ee7b7; min-height: 1.2em; margin-top: 8px; }
+    ol { margin: 0; padding-left: 1.2rem; color: #c5d0e0; line-height: 1.55; }
+    ol code { font-size: .85rem; color: #fde68a; }
+    .links { margin-top: 8px; font-size: .9rem; }
+    .links a { color: #60a5fa; }
+    footer { margin-top: 28px; color: #9aa8bc; font-size: .8rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Debian AI Agent</h1>
+  <p class="sub">Tiny browser chat agent for Debian (Gemini / ChatGPT / Grok / Claude / DeepSeek). Python only — no heavy installs.</p>
+
+  <div class="card">
+    <h2>1) One-line install</h2>
+    <code class="cmd" id="cmd">curl -fsSL https://raw.githubusercontent.com/jor-teron/debian-ai-agent/main/install.sh | bash</code>
+    <div class="row">
+      <button type="button" id="copyBtn">Copy command</button>
+    </div>
+    <div id="copied"></div>
+  </div>
+
+  <div class="card">
+    <h2>2) Or download the script</h2>
+    <p class="sub" style="margin:0 0 12px">Prefer to read it first? Download <code>install.sh</code>, then run it yourself.</p>
+    <div class="row">
+      <a class="btn secondary" href="https://raw.githubusercontent.com/jor-teron/debian-ai-agent/main/install.sh" download="install.sh">Download install.sh</a>
+      <a class="btn" href="https://github.com/jor-teron/debian-ai-agent">View on GitHub</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>After install</h2>
+    <ol>
+      <li>Add an API key: <code>nano ~/debian-ai-agent/.env</code></li>
+      <li>Restart: <code>systemctl --user restart debian-ai-agent</code></li>
+      <li>Open <code>http://127.0.0.1:8787</code></li>
+    </ol>
+    <p class="links">Full notes &amp; key links: <a href="https://github.com/jor-teron/debian-ai-agent#readme">README</a></p>
+  </div>
+
+  <footer>Site folder: <code>docs/</code> · installer: repo root <code>install.sh</code></footer>
+</main>
+<script>
+(function () {
+  var cmd = document.getElementById('cmd').textContent.trim();
+  var out = document.getElementById('copied');
+  document.getElementById('copyBtn').onclick = function () {
+    function ok() { out.textContent = 'Copied.'; setTimeout(function () { out.textContent = ''; }, 2000); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cmd).then(ok).catch(function () {
+        window.prompt('Copy this:', cmd);
+      });
+    } else {
+      window.prompt('Copy this:', cmd);
+    }
+  };
+})();
+</script>
+</body>
+</html>
