@@ -1,8 +1,9 @@
-# Debian AI Agent
+# AI Agent
 
 Version: see `VERSION`.
 
-Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek).
+Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek).  
+Works on **most Linux distros**.
 
 Install page: https://jor-teron.github.io/debian-ai-agent/
 
@@ -20,6 +21,9 @@ One line:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jor-teron/debian-ai-agent/main/install.sh | bash
 ```
+
+The installer detects `apt-get`, `dnf`, `yum`, `pacman`, `zypper`, or `apk`.  
+If none are found: **Manually install: python3, git, bubblewrap**
 
 Then edit keys and open the page:
 
@@ -58,7 +62,6 @@ Only your chat works. If it asks to run a command, reply **YES** or **NO**.
 ## Notes
 
 - Local browser only (`127.0.0.1:9191`). Remote chat via optional Telegram above.  
-
 - Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`, `telegram.py`; `run.py` starts it.  
 - Keys only in `.env` (never commit).  
 - Files/tools: `/home/$USER/ai-workspace`  

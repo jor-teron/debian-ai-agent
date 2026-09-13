@@ -1,4 +1,4 @@
-- One-line install via `install.sh`
+- One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 # Features
 
 ## Now

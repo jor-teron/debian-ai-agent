@@ -1,20 +1,18 @@
 #!/bin/sh
 # =============================================================================
-# debian-ai-agent — one-shot installer
+# AI Agent — one-shot installer (most Linux distros)
 # =============================================================================
 # What this does:
-#   1) Makes sure python3 + git + bubblewrap exist (apt on Debian/Ubuntu if needed)
+#   1) Detects the host package manager and installs python3, git, bubblewrap
 #   2) Clones or updates the repo into ~/debian-ai-agent
 #   3) Creates .env from the example if missing
-#   4) Enables the user background service (starts at login)
+#   4) Enables the user background service when systemd is available
 #
 # How people run it (one line):
 #   curl -fsSL https://raw.githubusercontent.com/jor-teron/debian-ai-agent/main/install.sh | bash
 #
-# Related files after install:
-#   run.py / config.py / tools.py / brain.py / ui.py / server.py — the app
-#   enable-boot.sh — systemd user service helper (called by this script)
-#   .env — your API keys (you edit this once)
+# Package managers tried (first match): apt-get, dnf, yum, pacman, zypper, apk
+# If none: print manual install line for python3, git, bubblewrap
 # =============================================================================
 
 set -e
@@ -27,13 +25,35 @@ INSTALL_DIR="${HOME}/debian-ai-agent"
 # ---------------------------------------------------------------------------
 
 say() {
-  # Simple status line so the install is easy to follow.
   printf '%s\n' "$*"
 }
 
 need_cmd() {
-  # Return 0 if command exists.
   command -v "$1" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+# Host / package manager detection
+# ---------------------------------------------------------------------------
+
+detect_pkg() {
+  # First match wins.
+  for pm in apt-get dnf yum pacman zypper apk; do
+    if need_cmd "$pm"; then
+      echo "$pm"
+      return 0
+    fi
+  done
+  echo none
+  return 1
+}
+
+show_host() {
+  if [ -f /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    say "Host: ${PRETTY_NAME:-$NAME}"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -41,30 +61,76 @@ need_cmd() {
 # ---------------------------------------------------------------------------
 
 install_deps() {
-  missing=""
-  need_cmd python3 || missing="$missing python3"
-  need_cmd git || missing="$missing git"
-  # Package name is bubblewrap; binary is bwrap (enables sandboxed shell freehand).
-  need_cmd bwrap || missing="$missing bubblewrap"
+  missing_py=0
+  missing_git=0
+  missing_bwrap=0
+  need_cmd python3 || missing_py=1
+  need_cmd git || missing_git=1
+  need_cmd bwrap || missing_bwrap=1
 
-  if [ -z "$missing" ]; then
+  if [ "$missing_py$missing_git$missing_bwrap" = "000" ]; then
     say "Dependencies OK (python3, git, bubblewrap)."
     return 0
   fi
 
-  say "Need:$missing"
-  if need_cmd apt-get; then
-    if need_cmd sudo; then
-      sudo apt-get update
-      # shellcheck disable=SC2086
-      sudo apt-get install -y $missing
-    else
-      say "Run as root or install:$missing"
-      exit 1
-    fi
-  else
-    say "Please install:$missing then re-run."
+  PKG=$(detect_pkg)
+  say "Package manager: $PKG"
+
+  if [ "$PKG" = "none" ]; then
+    say "Could not detect apt-get/dnf/yum/pacman/zypper/apk."
+    say "Manually install: python3, git, bubblewrap"
     exit 1
+  fi
+
+  if ! need_cmd sudo && [ "$(id -u)" -ne 0 ]; then
+    say "Need sudo (or root) to install packages."
+    say "Manually install: python3, git, bubblewrap"
+    exit 1
+  fi
+
+  run_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+      "$@"
+    else
+      sudo "$@"
+    fi
+  }
+
+  case "$PKG" in
+    apt-get)
+      run_root apt-get update
+      run_root apt-get install -y python3 git bubblewrap
+      ;;
+    dnf)
+      run_root dnf install -y python3 git bubblewrap
+      ;;
+    yum)
+      run_root yum install -y python3 git bubblewrap
+      ;;
+    pacman)
+      # Arch package for Python is "python" (provides python3).
+      run_root pacman -Sy --needed --noconfirm python git bubblewrap
+      ;;
+    zypper)
+      run_root zypper --non-interactive install python3 git bubblewrap
+      ;;
+    apk)
+      run_root apk add --no-cache python3 git bubblewrap
+      ;;
+    *)
+      say "Manually install: python3, git, bubblewrap"
+      exit 1
+      ;;
+  esac
+
+  # Re-check after install.
+  if ! need_cmd python3 || ! need_cmd git; then
+    say "Still missing python3 or git after install."
+    say "Manually install: python3, git, bubblewrap"
+    exit 1
+  fi
+  if ! need_cmd bwrap; then
+    say "Warning: bubblewrap (bwrap) not found — shell will ask Confirm instead of freehand."
   fi
 }
 
@@ -101,14 +167,20 @@ setup_env_and_service() {
   fi
 
   chmod +x run.sh enable-boot.sh install.sh 2>/dev/null || true
-  ./enable-boot.sh
+
+  if need_cmd systemctl; then
+    ./enable-boot.sh
+  else
+    say "No systemd — start manually with: ./run.sh"
+  fi
 }
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-say "=== debian-ai-agent install ==="
+say "=== AI Agent install ==="
+show_host
 install_deps
 fetch_repo
 setup_env_and_service
