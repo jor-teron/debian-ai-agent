@@ -1114,10 +1114,15 @@ def run_chat(message, provider=None, model=None, history=None):
 HTML = r"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="color-scheme" content="dark"/>
+<meta name="theme-color" content="#0f1419"/>
 <title>AI Agent</title>
 <style>
-body{margin:0;font-family:system-ui,sans-serif;background:#0f1419;color:#e7ecf3;display:flex;flex-direction:column;min-height:100vh}
-header{padding:12px 16px;background:#1a2332;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:system-ui,sans-serif;background:#0f1419;color:#e7ecf3;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+header{flex:0 0 auto;padding:12px 16px;background:#1a2332;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border-bottom:1px solid #2a3548}
 h1{font-size:1.05rem;margin:0}
 .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
 label{font-size:.75rem;color:#9aa8bc;display:block}
@@ -1125,20 +1130,22 @@ select,button,textarea,input[type=file]{font:inherit;border-radius:8px;border:1p
 select{padding:6px 8px}
 #status{font-size:.8rem;color:#9aa8bc;max-width:320px}
 #status.ok{color:#6ee7b7}#status.bad{color:#f87171}
-#note{font-size:.75rem;color:#fbbf24;padding:0 16px;min-height:0}
-#confirm{display:none;padding:10px 16px;background:#3a2a12;border-bottom:1px solid #5a4020;gap:8px;flex-wrap:wrap;align-items:center}
-#confirm.show{display:flex}
-#confirm code{flex:1;min-width:120px;word-break:break-all;font-size:.85rem}
-#confirm .ok{background:#6ee7b7}#confirm .no{background:#f87171;color:#041018}
-#log{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+#note{flex:0 0 auto;font-size:.75rem;color:#fbbf24;padding:0 16px;min-height:0}
+#log{flex:1 1 auto;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:0}
 .msg{max-width:820px;padding:10px 12px;border-radius:12px;white-space:pre-wrap;line-height:1.4}
 .user{align-self:flex-end;background:#243247}
 .bot{align-self:flex-start;background:#1a2332;border:1px solid #2a3548}
 .tools{margin-top:6px;font-size:.75rem;color:#9aa8bc}
 .dl{margin-top:6px;font-size:.8rem}
 .dl a{color:#60a5fa}
-form{display:flex;gap:8px;padding:12px;background:#1a2332;border-top:1px solid #2a3548;flex-wrap:wrap;align-items:end}
-textarea{flex:1;min-height:44px;padding:8px;min-width:160px}
+#dock{flex:0 0 auto;background:#1a2332;border-top:1px solid #2a3548}
+#confirm{display:none;padding:10px 16px;background:#3a2a12;border-bottom:1px solid #5a4020;gap:8px;flex-wrap:wrap;align-items:center}
+#confirm.show{display:flex}
+#confirm .label{font-size:.85rem;color:#fbbf24;font-weight:600}
+#confirm code{flex:1;min-width:120px;word-break:break-all;font-size:.85rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#fde68a;background:#1a1208;padding:6px 8px;border-radius:6px}
+#confirm .ok{background:#6ee7b7;color:#041018}#confirm .no{background:#f87171;color:#041018}
+form{display:flex;gap:8px;padding:12px;flex-wrap:wrap;align-items:end}
+textarea{flex:1;min-height:44px;padding:8px;min-width:160px;resize:vertical;max-height:160px}
 button{padding:10px 14px;background:#60a5fa;border:none;color:#041018;font-weight:600;cursor:pointer}
 button:disabled{opacity:.5}
 .up{font-size:.75rem}
@@ -1157,16 +1164,20 @@ button:disabled{opacity:.5}
   </div>
 </header>
 <div id="note"></div>
-<div id="confirm"><span>Run shell?</span><code id="pendingCmd"></code>
-  <button type="button" class="ok" id="btnConfirm">Confirm</button>
-  <button type="button" class="no" id="btnCancel">Cancel</button>
-</div>
 <div id="log"></div>
-<form id="f">
-  <textarea id="input" placeholder="Ask something…" required></textarea>
-  <div class="up"><label>Upload</label><input type="file" id="file"/></div>
-  <button id="send">Send</button>
-</form>
+<div id="dock">
+  <div id="confirm">
+    <span class="label">Run shell?</span>
+    <code id="pendingCmd"></code>
+    <button type="button" class="ok" id="btnConfirm">Confirm</button>
+    <button type="button" class="no" id="btnCancel">Cancel</button>
+  </div>
+  <form id="f">
+    <textarea id="input" placeholder="Ask something…" required></textarea>
+    <div class="up"><label>Upload</label><input type="file" id="file"/></div>
+    <button id="send">Send</button>
+  </form>
+</div>
 <script>
 const log=document.getElementById('log'),provider=document.getElementById('provider');
 const tier=document.getElementById('tier'),model=document.getElementById('model');
@@ -1275,6 +1286,9 @@ fileInput.onchange=async()=>{
     else add('bot','Upload failed: '+(res.error||'?'));
   }catch(e){add('bot','Upload error: '+e);} finally{fileInput.value=''; send.disabled=false;}
 };
+input.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('f').requestSubmit();}
+});
 document.getElementById('f').onsubmit=async ev=>{
   ev.preventDefault(); const message=input.value.trim(); if(!message) return;
   add('user',message); input.value=''; send.disabled=true;

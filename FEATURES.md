@@ -10,7 +10,9 @@
 - Files + shell in `/home/$USER/ai-agent`
 - Background + start at login
 - Memory — `memory.md`; tools + injected into system prompt
-- Confirm before shell — UI Confirm/Cancel
+- Confirm before shell — sticky amber bar above the text box (Confirm/Cancel)
+- Enter sends; Shift+Enter new line
+- Dark mode by default
 - Upload / download in the page
 - Web search — Gemini Google Search tool (`web_search`); needs `GEMINI_API_KEY` even if chatting via another provider
 - Reminders — `reminders.json`, notify-send, `/api/reminders`
