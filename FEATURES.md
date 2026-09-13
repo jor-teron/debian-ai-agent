@@ -1,6 +1,7 @@
 # Features
 
 ## Now
+- **Modular layout** — `config.py` / `tools.py` / `brain.py` / `ui.py` / `server.py` / `run.py` (stdlib only; same behavior as the old single-file app)
 - **Multi-provider chat** — Provider → Free/Paid → Model in the UI
   - **gemini** — Gemini generateContent + function calling (`GEMINI_API_KEY`)
   - **openai** — Chat Completions + tools (`OPENAI_API_KEY`); free: `gpt-4o-mini`, `gpt-4.1-mini`; paid: `gpt-4o`, `gpt-4.1`

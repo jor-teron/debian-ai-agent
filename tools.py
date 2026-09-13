@@ -1,0 +1,630 @@
+"""
+Workspace tools: files, shell, memory, reminders, jobs, web_search.
+
+The model calls these through brain.py → dispatch(). File and shell work is
+jailed to WORKSPACE. Shell commands wait for a Confirm click in the UI.
+
+Imports from: config.py (paths, BLOCKED, SYSTEM_BASE, keys). Lazily imports
+              brain.py for _http_json (search) and _plain_chat (jobs).
+Used by: brain.py (dispatch, TOOL_DECLS, schemas, build_system),
+         server.py (upload/download/confirm/reminders),
+         run.py (background_loop).
+"""
+import json
+import subprocess
+import time
+import urllib.error
+from datetime import datetime, timezone
+from pathlib import Path
+from config import (
+    BLOCKED,
+    GEMINI_API_BASE,
+    JOBS_FILE,
+    JOBS_LOG,
+    MEMORY_FILE,
+    PENDING_SHELL,
+    PROVIDERS,
+    REMINDERS_FILE,
+    SYSTEM_BASE,
+    WORKSPACE,
+    allowed,
+    ensure_ws,
+    provider_key,
+)
+
+
+# ---------------------------------------------------------------------------
+# Memory (memory.md — also injected into the system prompt)
+# ---------------------------------------------------------------------------
+
+
+def memory_load():
+    """Read workspace/memory.md (capped) or return empty string."""
+    ensure_ws()
+    if not MEMORY_FILE.exists():
+        return ""
+    return MEMORY_FILE.read_text(encoding="utf-8")[:20000]
+
+
+def memory_save(text):
+    """Overwrite memory.md with the given text."""
+    ensure_ws()
+    MEMORY_FILE.write_text(text or "", encoding="utf-8")
+    return {"ok": True, "path": str(MEMORY_FILE), "bytes": len((text or "").encode("utf-8"))}
+
+
+def memory_append(note):
+    """Append one lasting note to memory.md."""
+    ensure_ws()
+    cur = memory_load()
+    add = (note or "").strip()
+    if not add:
+        return {"ok": False, "error": "Empty note"}
+    sep = "\n" if cur and not cur.endswith("\n") else ""
+    memory_save(cur + sep + add + "\n")
+    return {"ok": True, "path": str(MEMORY_FILE)}
+
+
+def build_system():
+    """System prompt = SYSTEM_BASE plus any notes from memory.md."""
+    mem = memory_load().strip()
+    if mem:
+        return SYSTEM_BASE + "\n\n## Memory (from workspace/memory.md)\n" + mem[:8000]
+    return SYSTEM_BASE
+
+
+# ---------------------------------------------------------------------------
+# File tools (jailed to WORKSPACE)
+# ---------------------------------------------------------------------------
+
+
+def safe_path(user_path: str) -> Path:
+    """Resolve a path and reject anything that escapes the workspace."""
+    raw = Path(user_path).expanduser()
+    cand = (WORKSPACE / raw).resolve() if not raw.is_absolute() else raw.resolve()
+    try:
+        cand.relative_to(WORKSPACE.resolve())
+    except ValueError as e:
+        raise PermissionError("Path outside workspace") from e
+    return cand
+
+
+def tool_list_dir(path: str = ".") -> dict:
+    """List files and folders under a workspace path."""
+    ensure_ws()
+    t = safe_path(path)
+    if not t.is_dir():
+        return {"ok": False, "error": "Not a directory: %s" % t}
+    entries = [{"name": c.name, "type": "dir" if c.is_dir() else "file"} for c in sorted(t.iterdir())]
+    return {"ok": True, "path": str(t), "entries": entries}
+
+
+def tool_read_file(path: str) -> dict:
+    """Read a text file in the workspace (first 200 KB)."""
+    ensure_ws()
+    t = safe_path(path)
+    if not t.is_file():
+        return {"ok": False, "error": "Not a file: %s" % t}
+    data = t.read_bytes()[:200_000]
+    return {"ok": True, "path": str(t), "content": data.decode("utf-8", errors="replace")}
+
+
+def tool_write_file(path: str, content: str) -> dict:
+    """Write a UTF-8 text file in the workspace (creates parent folders)."""
+    ensure_ws()
+    t = safe_path(path)
+    t.parent.mkdir(parents=True, exist_ok=True)
+    t.write_text(content, encoding="utf-8")
+    return {"ok": True, "path": str(t), "name": t.name}
+
+
+def tool_write_bytes(path: str, data: bytes) -> dict:
+    """Write raw bytes (used by the upload API for non-text files)."""
+    ensure_ws()
+    t = safe_path(path)
+    t.parent.mkdir(parents=True, exist_ok=True)
+    t.write_bytes(data)
+    return {"ok": True, "path": str(t), "name": t.name, "bytes": len(data)}
+
+
+# ---------------------------------------------------------------------------
+# Shell (queue → UI Confirm/Cancel → run)
+# ---------------------------------------------------------------------------
+
+
+def _shell_execute(cmd):
+    """Run a command in the workspace with a 30s timeout. Internal only."""
+    try:
+        p = subprocess.run(
+            cmd, shell=True, cwd=str(WORKSPACE), capture_output=True, text=True, timeout=30
+        )
+        return {
+            "ok": p.returncode == 0,
+            "exit_code": p.returncode,
+            "stdout": p.stdout[-40000:],
+            "stderr": p.stderr[-10000:],
+            "command": cmd,
+        }
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "Timed out", "command": cmd}
+
+
+def tool_run_shell(command, confirmed=False):
+    """Queue shell for user confirm unless confirmed=True."""
+    ensure_ws()
+    cmd = (command or "").strip()
+    if not cmd:
+        return {"ok": False, "error": "Empty command"}
+    if BLOCKED.search(cmd) or cmd.startswith("sudo"):
+        return {"ok": False, "error": "Command blocked for safety"}
+    if not confirmed:
+        PENDING_SHELL.write_text(json.dumps({"command": cmd}), encoding="utf-8")
+        return {
+            "ok": False,
+            "needs_confirm": True,
+            "command": cmd,
+            "error": "Waiting for user confirm in the UI",
+        }
+    if PENDING_SHELL.exists():
+        PENDING_SHELL.unlink()
+    return _shell_execute(cmd)
+
+
+def confirm_pending_shell():
+    """UI Confirm: run the queued command (and clear the queue)."""
+    ensure_ws()
+    if not PENDING_SHELL.exists():
+        return {"ok": False, "error": "Nothing to confirm"}
+    data = json.loads(PENDING_SHELL.read_text(encoding="utf-8"))
+    cmd = data.get("command") or ""
+    return tool_run_shell(cmd, confirmed=True)
+
+
+def cancel_pending_shell():
+    """UI Cancel: drop the queued command without running it."""
+    if PENDING_SHELL.exists():
+        PENDING_SHELL.unlink()
+    return {"ok": True, "cancelled": True}
+
+
+# ---------------------------------------------------------------------------
+# Small JSON / time helpers
+# ---------------------------------------------------------------------------
+
+
+def _load_json_list(path: Path):
+    """Read a JSON array from disk, or [] if missing/corrupt."""
+    ensure_ws()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8") or "[]")
+        return data if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
+def _save_json_list(path: Path, items):
+    """Write a JSON array (pretty-printed)."""
+    ensure_ws()
+    path.write_text(json.dumps(items, indent=2), encoding="utf-8")
+
+
+def _now_iso():
+    """UTC timestamp as ISO-8601 without microseconds."""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _parse_due(due_iso=None, in_minutes=None):
+    """Turn in_minutes or due_iso into a UTC ISO string, or (None, error)."""
+    if in_minutes is not None:
+        try:
+            mins = float(in_minutes)
+        except (TypeError, ValueError):
+            return None, "in_minutes must be a number"
+        due = datetime.now(timezone.utc).timestamp() + max(0, mins) * 60
+        return datetime.fromtimestamp(due, tz=timezone.utc).replace(microsecond=0).isoformat(), None
+    if due_iso:
+        s = str(due_iso).strip()
+        try:
+            if s.endswith("Z"):
+                s = s[:-1] + "+00:00"
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).replace(microsecond=0).isoformat(), None
+        except ValueError:
+            return None, "Invalid due_iso"
+    return None, "Need due_iso or in_minutes"
+
+
+# ---------------------------------------------------------------------------
+# Reminders (reminders.json + optional notify-send)
+# ---------------------------------------------------------------------------
+
+
+def tool_reminder_add(text, due_iso=None, in_minutes=None):
+    """Add a reminder. Use in_minutes (number) or due_iso (ISO datetime)."""
+    note = (text or "").strip()
+    if not note:
+        return {"ok": False, "error": "Empty text"}
+    due, err = _parse_due(due_iso, in_minutes)
+    if err:
+        return {"ok": False, "error": err}
+    items = _load_json_list(REMINDERS_FILE)
+    rid = "r%d" % (int(time.time() * 1000) % 10_000_000_000)
+    item = {"id": rid, "text": note, "due": due, "notified": False, "created": _now_iso()}
+    items.append(item)
+    _save_json_list(REMINDERS_FILE, items)
+    return {"ok": True, "reminder": item}
+
+
+def tool_reminder_list():
+    """Split reminders into due vs upcoming (and return the full list)."""
+    items = _load_json_list(REMINDERS_FILE)
+    now = datetime.now(timezone.utc)
+    due = []
+    upcoming = []
+    for it in items:
+        try:
+            d = datetime.fromisoformat(it.get("due") or "")
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+        except ValueError:
+            upcoming.append(it)
+            continue
+        if d <= now:
+            due.append(it)
+        else:
+            upcoming.append(it)
+    return {"ok": True, "due": due, "upcoming": upcoming, "all": items}
+
+
+def _notify_send(title, body):
+    """Desktop notification if notify-send is installed; ignore failures."""
+    try:
+        subprocess.run(
+            ["notify-send", str(title)[:80], str(body)[:200]],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        return True
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def process_due_reminders():
+    """Mark newly due reminders and fire notify-send once each."""
+    items = _load_json_list(REMINDERS_FILE)
+    if not items:
+        return
+    now = datetime.now(timezone.utc)
+    changed = False
+    for it in items:
+        if it.get("notified"):
+            continue
+        try:
+            d = datetime.fromisoformat(it.get("due") or "")
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+        if d <= now:
+            _notify_send("AI Agent reminder", it.get("text") or "")
+            it["notified"] = True
+            it["notified_at"] = _now_iso()
+            changed = True
+    if changed:
+        _save_json_list(REMINDERS_FILE, items)
+
+
+# ---------------------------------------------------------------------------
+# Scheduled jobs (jobs.json → jobs_log.md)
+# ---------------------------------------------------------------------------
+
+
+def tool_job_add(every_minutes, prompt):
+    """Schedule a recurring prompt (every_minutes >= 1)."""
+    try:
+        mins = float(every_minutes)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "every_minutes must be a number"}
+    if mins < 1:
+        return {"ok": False, "error": "every_minutes must be >= 1"}
+    p = (prompt or "").strip()
+    if not p:
+        return {"ok": False, "error": "Empty prompt"}
+    items = _load_json_list(JOBS_FILE)
+    jid = "j%d" % (int(time.time() * 1000) % 10_000_000_000)
+    item = {
+        "id": jid,
+        "every_minutes": mins,
+        "prompt": p,
+        "last_run": None,
+        "created": _now_iso(),
+    }
+    items.append(item)
+    _save_json_list(JOBS_FILE, items)
+    return {"ok": True, "job": item}
+
+
+def tool_job_list():
+    """Return the current jobs.json list."""
+    return {"ok": True, "jobs": _load_json_list(JOBS_FILE)}
+
+
+def process_due_jobs():
+    """Run any job whose interval has elapsed; append the reply to jobs_log.md."""
+    items = _load_json_list(JOBS_FILE)
+    if not items:
+        return
+    now = time.time()
+    changed = False
+    for it in items:
+        mins = float(it.get("every_minutes") or 0)
+        if mins < 1:
+            continue
+        last = it.get("last_run")
+        last_ts = 0.0
+        if last:
+            try:
+                dt = datetime.fromisoformat(last)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                last_ts = dt.timestamp()
+            except ValueError:
+                last_ts = 0.0
+        if last_ts and (now - last_ts) < mins * 60:
+            continue
+        prompt = it.get("prompt") or ""
+        from brain import _plain_chat
+        result = _plain_chat(
+            "Scheduled job (%s). Respond briefly.\n\n%s" % (it.get("id"), prompt)
+        )
+        ensure_ws()
+        stamp = _now_iso()
+        line = "\n## Job %s @ %s\n**Prompt:** %s\n\n%s\n" % (
+            it.get("id"),
+            stamp,
+            prompt,
+            result.get("reply") or result.get("error") or "",
+        )
+        with JOBS_LOG.open("a", encoding="utf-8") as f:
+            f.write(line)
+        it["last_run"] = stamp
+        changed = True
+    if changed:
+        _save_json_list(JOBS_FILE, items)
+
+
+# ---------------------------------------------------------------------------
+# Background loop (started from run.py)
+# ---------------------------------------------------------------------------
+
+
+def background_loop():
+    """Every 30s: fire due reminders and due jobs. Errors are printed, not fatal."""
+    while True:
+        try:
+            process_due_reminders()
+            process_due_jobs()
+        except Exception as e:  # noqa: BLE001
+            print("[bg] error: %s" % e)
+        time.sleep(30)
+
+
+# ---------------------------------------------------------------------------
+# Web search (Gemini Google Search tool — needs GEMINI_API_KEY)
+# ---------------------------------------------------------------------------
+
+
+def tool_web_search(query):
+    """Ask Gemini to summarize live search results for the query."""
+    q = (query or "").strip()
+    if not q:
+        return {"ok": False, "error": "Empty query"}
+    key = provider_key("gemini")
+    if not key:
+        return {
+            "ok": False,
+            "error": "web_search needs GEMINI_API_KEY (uses Gemini Google Search). Set it in .env or skip search.",
+            "query": q,
+        }
+    model = allowed("gemini", PROVIDERS["gemini"]["default"])
+    url = "%s/models/%s:generateContent?key=%s" % (GEMINI_API_BASE, model, key)
+
+    tool_shapes = [{"google_search": {}}, {"googleSearch": {}}]
+    last_err = ""
+    from brain import _http_json
+    for tools_obj in tool_shapes:
+        body = {
+            "contents": [{"role": "user", "parts": [{"text": "Summarize search results for: %s" % q}]}],
+            "tools": [tools_obj],
+        }
+        try:
+            data = _http_json(url, body, {"Content-Type": "application/json"}, timeout=60)
+        except urllib.error.HTTPError as e:
+            err = e.read().decode("utf-8", errors="replace")[:600]
+            last_err = "HTTP %s: %s" % (e.code, err)
+            continue
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": str(e), "query": q}
+
+        parts = (((data.get("candidates") or [{}])[0].get("content") or {}).get("parts")) or []
+        texts = [p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p]
+        summary = "\n".join(texts).strip() or "(No search summary)"
+        gm = ((data.get("candidates") or [{}])[0].get("groundingMetadata")) or {}
+        return {
+            "ok": True,
+            "query": q,
+            "summary": summary[:12000],
+            "tool_shape": list(tools_obj.keys())[0],
+            "grounding_chunks": len((gm.get("groundingChunks") or [])),
+        }
+    return {"ok": False, "error": last_err or "google_search failed", "query": q}
+
+
+# ---------------------------------------------------------------------------
+# Tool schemas the models see (Gemini native + OpenAI/Anthropic wrappers)
+# ---------------------------------------------------------------------------
+
+# Gemini functionDeclarations. openai_tools / anthropic_tools wrap this list.
+TOOL_DECLS = [
+    {
+        "name": "list_dir",
+        "description": "List files in the workspace",
+        "parameters": {"type": "object", "properties": {"path": {"type": "string"}}},
+    },
+    {
+        "name": "read_file",
+        "description": "Read a text file in the workspace",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write_file",
+        "description": "Write a text file in the workspace",
+        "parameters": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "run_shell",
+        "description": "Propose a shell command (cwd=workspace). User must confirm in UI before it runs.",
+        "parameters": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "memory_read",
+        "description": "Read long-term memory notes for this user",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "memory_append",
+        "description": "Append a lasting note to memory",
+        "parameters": {
+            "type": "object",
+            "properties": {"note": {"type": "string"}},
+            "required": ["note"],
+        },
+    },
+    {
+        "name": "web_search",
+        "description": "Search the web via Gemini Google Search; returns a text summary",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "reminder_add",
+        "description": "Add a PC reminder. Use in_minutes (number) or due_iso (ISO datetime).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string"},
+                "in_minutes": {"type": "number"},
+                "due_iso": {"type": "string"},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "reminder_list",
+        "description": "List reminders (due and upcoming)",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "job_add",
+        "description": "Schedule a recurring job: every_minutes + prompt; result appended to jobs_log.md",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "every_minutes": {"type": "number"},
+                "prompt": {"type": "string"},
+            },
+            "required": ["every_minutes", "prompt"],
+        },
+    },
+    {
+        "name": "job_list",
+        "description": "List scheduled jobs",
+        "parameters": {"type": "object", "properties": {}},
+    },
+]
+
+
+def openai_tools():
+    """TOOL_DECLS in OpenAI Chat Completions tools[] shape."""
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t.get("parameters") or {"type": "object", "properties": {}},
+            },
+        }
+        for t in TOOL_DECLS
+    ]
+
+
+def anthropic_tools():
+    """TOOL_DECLS in Anthropic Messages tools[] shape (input_schema)."""
+    return [
+        {
+            "name": t["name"],
+            "description": t["description"],
+            "input_schema": t.get("parameters") or {"type": "object", "properties": {}},
+        }
+        for t in TOOL_DECLS
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Dispatch: model tool name → Python function
+# ---------------------------------------------------------------------------
+
+
+def dispatch(name, args):
+    """Run one tool by name. Always returns a dict (ok/error), never raises."""
+    try:
+        if name == "list_dir":
+            return tool_list_dir(args.get("path") or ".")
+        if name == "read_file":
+            return tool_read_file(args["path"])
+        if name == "write_file":
+            return tool_write_file(args["path"], args.get("content", ""))
+        if name == "run_shell":
+            return tool_run_shell(args["command"])
+        if name == "memory_read":
+            return {"ok": True, "memory": memory_load()}
+        if name == "memory_append":
+            return memory_append(args.get("note") or "")
+        if name == "web_search":
+            return tool_web_search(args.get("query") or "")
+        if name == "reminder_add":
+            return tool_reminder_add(
+                args.get("text") or "",
+                due_iso=args.get("due_iso"),
+                in_minutes=args.get("in_minutes"),
+            )
+        if name == "reminder_list":
+            return tool_reminder_list()
+        if name == "job_add":
+            return tool_job_add(args.get("every_minutes"), args.get("prompt") or "")
+        if name == "job_list":
+            return tool_job_list()
+        return {"ok": False, "error": "Unknown tool %s" % name}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": "%s: %s" % (type(e).__name__, e)}

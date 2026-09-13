@@ -1,0 +1,228 @@
+"""
+HTTP UI and API handler (stdlib http.server).
+
+Serves the chat page from ui.py and the JSON routes the browser calls.
+Does not talk to LLM APIs itself — that is brain.run_chat.
+
+Imports from: config.py (settings, keys), tools.py (upload/download/confirm),
+              brain.py (run_chat), ui.py (HTML page).
+Used by: run.py (ThreadingHTTPServer(..., Handler)).
+"""
+import base64
+import json
+import socket
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from config import (
+    HOST,
+    PENDING_SHELL,
+    PORT,
+    PROVIDERS,
+    WORKSPACE,
+    app_version,
+    default_model,
+    default_provider,
+    keys_status,
+)
+from tools import (
+    cancel_pending_shell,
+    confirm_pending_shell,
+    safe_path,
+    tool_reminder_list,
+    tool_write_bytes,
+    tool_write_file,
+)
+from brain import run_chat
+from ui import HTML
+
+
+# ---------------------------------------------------------------------------
+# Request handler
+# ---------------------------------------------------------------------------
+
+
+class Handler(BaseHTTPRequestHandler):
+    """One object per HTTP request. Routes GET/POST to the methods below."""
+
+    def log_message(self, fmt, *args):  # quieter terminal
+        """Print a one-line access log (default http.server is noisier)."""
+        print("[%s] %s" % (self.log_date_time_string(), fmt % args))
+
+    def _send(self, code, body, content_type):
+        """Write a raw HTTP response (status, headers, body)."""
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, code, obj):
+        """Send a dict/list as JSON (UTF-8)."""
+        raw = json.dumps(obj).encode("utf-8")
+        self._send(code, raw, "application/json; charset=utf-8")
+
+    def do_GET(self):  # noqa: N802
+        """Handle GET: page, health, models, reminders, download, pending."""
+        path = self.path.split("?", 1)[0]
+        if path in ("/", "/index.html"):
+            # Chat page (HTML/CSS/JS from ui.py)
+            self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if path == "/api/health":
+            # Keys, version, workspace, due reminders (UI status + banner)
+            rem = tool_reminder_list()
+            due = rem.get("due") or []
+            keys = keys_status()
+            self._json(
+                200,
+                {
+                    "ok": True,
+                    "keys": keys,
+                    "api_key_set": any(keys.values()),
+                    "workspace": str(WORKSPACE),
+                    "pending_shell": PENDING_SHELL.exists(),
+                    "version": app_version(),
+                    "host": HOST,
+                    "port": PORT,
+                    "default_provider": default_provider(),
+                    "due_reminders": [
+                        {"id": r.get("id"), "text": r.get("text"), "due": r.get("due")} for r in due
+                    ],
+                },
+            )
+            return
+        if path == "/api/models":
+            # Provider catalog for the Provider / Free-Paid / Model dropdowns
+            providers = {
+                pid: {"free": list(meta["free"]), "paid": list(meta["paid"])}
+                for pid, meta in PROVIDERS.items()
+            }
+            dp = default_provider()
+            self._json(
+                200,
+                {
+                    "providers": providers,
+                    "default_provider": dp,
+                    "default_model": default_model(dp),
+                },
+            )
+            return
+        if path == "/api/reminders":
+            # Same list the model sees (due + upcoming)
+            self._json(200, tool_reminder_list())
+            return
+        if path == "/api/download":
+            # Serve a workspace file by basename (?name=foo.txt)
+            qs = parse_qs(urlparse(self.path).query)
+            name = Path((qs.get("name") or [""])[0]).name
+            if not name:
+                self._json(400, {"ok": False, "error": "name required"})
+                return
+            try:
+                target = safe_path(name)
+            except PermissionError as e:
+                self._json(403, {"ok": False, "error": str(e)})
+                return
+            if not target.is_file():
+                self._json(404, {"ok": False, "error": "file not found"})
+                return
+            data = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        if path == "/api/pending":
+            # Sticky confirm bar polls this: {command: "..."} or {command: null}
+            if PENDING_SHELL.exists():
+                self._json(200, json.loads(PENDING_SHELL.read_text(encoding="utf-8")))
+            else:
+                self._json(200, {"command": None})
+            return
+        self._json(404, {"ok": False, "error": "Not found"})
+
+    def do_POST(self):  # noqa: N802
+        """Handle POST: confirm/cancel shell, upload, chat."""
+        path = self.path.split("?", 1)[0]
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b""
+
+        if path == "/api/confirm":
+            # User clicked Confirm — run the queued shell command
+            self._json(200, confirm_pending_shell())
+            return
+        if path == "/api/cancel":
+            # User clicked Cancel — drop the queued command
+            self._json(200, cancel_pending_shell())
+            return
+        if path == "/api/upload":
+            # Browser file picker: text as UTF-8, binaries as base64
+            try:
+                data = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                self._json(400, {"ok": False, "error": "Invalid JSON"})
+                return
+            name = Path(data.get("name") or "").name
+            if not name:
+                self._json(400, {"ok": False, "error": "name required"})
+                return
+            enc = (data.get("encoding") or "text").lower()
+            content = data.get("content") or ""
+            if enc == "base64":
+                try:
+                    blob = base64.b64decode(content)
+                except Exception as e:  # noqa: BLE001
+                    self._json(400, {"ok": False, "error": "bad base64: %s" % e})
+                    return
+                if len(blob) > 2_000_000:
+                    self._json(400, {"ok": False, "error": "file too large (max ~2MB)"})
+                    return
+                result = tool_write_bytes(name, blob)
+            else:
+                result = tool_write_file(name, content)
+            self._json(200 if result.get("ok") else 400, result)
+            return
+        if path != "/api/chat":
+            self._json(404, {"ok": False, "error": "Not found"})
+            return
+        # Chat: message + optional provider/model/history → brain.run_chat
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            self._json(400, {"ok": False, "error": "Invalid JSON"})
+            return
+        message = (data.get("message") or "").strip()
+        if not message:
+            self._json(400, {"ok": False, "error": "message required"})
+            return
+        result = run_chat(
+            message,
+            provider=data.get("provider"),
+            model=data.get("model"),
+            history=data.get("history") or [],
+        )
+        self._json(200 if result.get("ok") else 400, result)
+
+
+# ---------------------------------------------------------------------------
+# Startup helper (used by run.py for LAN tips)
+# ---------------------------------------------------------------------------
+
+
+def _lan_ips():
+    """Guess this PC's LAN IP (UDP connect trick; no packets are sent)."""
+    ips = []
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            ips.append(s.getsockname()[0])
+        finally:
+            s.close()
+    except OSError:
+        pass
+    return ips

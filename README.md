@@ -42,6 +42,7 @@ In the page: **Provider → Free/Paid → Model**.
 
 ## Notes
 
+- Code is split into `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`; `run.py` is the launcher.  
 - Keys only in `.env` (never commit).  
 - Files/tools: `/home/$USER/ai-agent`  
 - Phone on Wi‑Fi: `HOST=0.0.0.0` in `.env`, then restart.  
