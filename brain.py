@@ -238,6 +238,10 @@ def openai_compat_chat(provider, message, model, history):
         "Content-Type": "application/json",
         "Authorization": "Bearer %s" % key,
     }
+    # OpenRouter asks for these optional attribution headers on free/paid routes.
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/jor-teron/debian-ai-agent"
+        headers["X-Title"] = "AI-Agent"
     tool_trace = []
     reply = ""
 

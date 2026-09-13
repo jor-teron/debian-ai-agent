@@ -9,14 +9,17 @@
   - **xai** — OpenAI-compatible at `https://api.x.ai/v1` (`XAI_API_KEY`); free: `grok-4.3`, `grok-3-mini` (legacy); paid: `grok-4.6`, `grok-4.5` (2026-09 public catalog)
   - **anthropic** — Messages API + tools (`ANTHROPIC_API_KEY`); free: `claude-haiku-4-5`; paid: `claude-sonnet-5`, `claude-sonnet-4-6`
   - **deepseek** — OpenAI-compatible at `https://api.deepseek.com/v1` (`DEEPSEEK_API_KEY`); free: `deepseek-chat`; paid: `deepseek-reasoner`
+  - **openrouter** — OpenAI-compatible at `https://openrouter.ai/api/v1` (`OPENROUTER_API_KEY`); e.g. `openrouter/auto`, `openai/gpt-4o-mini`, `google/gemini-2.0-flash-001`, `meta-llama/llama-3.3-70b-instruct`
+  - **deepinfra** — OpenAI-compatible at `https://api.deepinfra.com/v1/openai` (`DEEPINFRA_API_KEY`); e.g. `meta-llama/Meta-Llama-3.1-8B-Instruct`, `google/gemma-2-9b-it`
 - Files + shell in `/home/$USER/ai-workspace`
 - Background + start at login
-- Memory — `memory.md`; tools + injected into system prompt
+- Memory — `memory/` tree (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topic/*.md`); tools + injected into system prompt; optional `SESSION_RESET_HOURS` / `SESSION_RESET_AFTER`; legacy `memory.md` migrates once
+- Shell blocklist — expanded (rm -rf ~/$HOME/*, chmod/chown -R /, mkfs, dd, shutdown/reboot, crontab -r, useradd/del/passwd, wipefs, losetup, systemctl start/stop/…, curl|sh); sudo still refused
 - Shell sandbox — bubblewrap (`bwrap`) when available: freehand run inside sandbox (workspace RW, tools RO, network on); without bwrap, Confirm / Telegram YES-NO as before; BLOCKED + sudo still refused
 - Confirm before shell (fallback when no bwrap); success shows "Done." — sticky amber bar above the text box (Confirm/Cancel)
 - Enter sends; Shift+Enter new line
 - Dark mode by default
-- Status line: Ready · Provider / No key for Provider (human-readable)
+- Header shows version beside title; status: Ready · Provider / No key for Provider
 - Update by re-running install.sh (keeps .env)
 - Upload / download in the page
 - Web search — Gemini Google Search tool (`web_search`); needs `GEMINI_API_KEY` even if chatting via another provider

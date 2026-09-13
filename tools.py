@@ -23,56 +23,242 @@ from config import (
     GEMINI_API_BASE,
     JOBS_FILE,
     JOBS_LOG,
+    MEMORY_ASSISTANT,
+    MEMORY_DATE_DIR,
+    MEMORY_DIR,
     MEMORY_FILE,
+    MEMORY_SESSION,
+    MEMORY_TOPIC_DIR,
+    MEMORY_USER,
     PENDING_SHELL,
     PROVIDERS,
     REMINDERS_FILE,
     SYSTEM_BASE,
     WORKSPACE,
     allowed,
+    ensure_memory_dirs,
     ensure_ws,
+    memory_date_path,
+    memory_topic_path,
     provider_key,
+    session_should_reset,
 )
 
 
 # ---------------------------------------------------------------------------
-# Memory (memory.md — also injected into the system prompt)
+# Memory (workspace/memory/ — also injected into the system prompt)
 # ---------------------------------------------------------------------------
+# Layout:
+#   memory/session.md     — short-lived (auto-cleared; see SESSION_RESET_*)
+#   memory/user.md        — lasting user facts
+#   memory/assistant.md   — extras for the AI (not a copy of SYSTEM_BASE)
+#   memory/date/YYYY_MM.md — monthly logs: "- [YYYY-MM-DD] : text"
+#   memory/topic/<name>.md — same line format
+# Legacy: if workspace/memory.md exists and the new tree is empty, migrate once.
+
+# Caps for prompt injection (chars). Full files still readable via memory_read.
+_MEM_CAP_USER = 3000
+_MEM_CAP_ASSISTANT = 3000
+_MEM_CAP_DATE = 4000
+_MEM_CAP_SESSION = 2000
 
 
-def memory_load():
-    """Read workspace/memory.md (capped) or return empty string."""
-    ensure_ws()
-    if not MEMORY_FILE.exists():
+def _read_capped(path, cap):
+    """Read a UTF-8 file capped to cap chars, or empty string if missing."""
+    if not path.exists() or not path.is_file():
         return ""
-    return MEMORY_FILE.read_text(encoding="utf-8")[:20000]
+    return path.read_text(encoding="utf-8")[:cap]
 
 
-def memory_save(text):
-    """Overwrite memory.md with the given text."""
+def _memory_tree_empty():
+    """True if new memory tree has no non-empty content files yet."""
+    if not MEMORY_DIR.exists():
+        return True
+    for p in (
+        MEMORY_SESSION,
+        MEMORY_USER,
+        MEMORY_ASSISTANT,
+    ):
+        if p.exists() and p.stat().st_size > 0:
+            return False
+    if MEMORY_DATE_DIR.exists():
+        for p in MEMORY_DATE_DIR.glob("*.md"):
+            if p.is_file() and p.stat().st_size > 0:
+                return False
+    if MEMORY_TOPIC_DIR.exists():
+        for p in MEMORY_TOPIC_DIR.glob("*.md"):
+            if p.is_file() and p.stat().st_size > 0:
+                return False
+    return True
+
+
+def migrate_legacy_memory():
+    """One-shot: copy old memory.md into date/YYYY_MM.md if new tree is empty."""
+    ensure_memory_dirs()
+    if not MEMORY_FILE.exists():
+        return False
+    if not _memory_tree_empty():
+        return False
+    old = MEMORY_FILE.read_text(encoding="utf-8").strip()
+    if not old:
+        return False
+    dest = memory_date_path()
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    note = (
+        "- [%s] : [migrated from memory.md]\n" % stamp
+        + old
+        + ("\n" if not old.endswith("\n") else "")
+    )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(note, encoding="utf-8")
+    return True
+
+
+def maybe_reset_session():
+    """Clear session.md when SESSION_RESET_HOURS / SESSION_RESET_AFTER say so."""
+    ensure_memory_dirs()
+    if not MEMORY_SESSION.exists():
+        return False
+    if MEMORY_SESSION.stat().st_size == 0:
+        return False
+    mtime = MEMORY_SESSION.stat().st_mtime
+    if session_should_reset(mtime):
+        MEMORY_SESSION.write_text("", encoding="utf-8")
+        return True
+    return False
+
+
+def _dated_line(text):
+    """Format one memory log line: '- [YYYY-MM-DD] : text'."""
+    stamp = datetime.now().strftime("%Y-%m-%d")
+    body = (text or "").strip().replace("\n", " ")
+    return "- [%s] : %s\n" % (stamp, body)
+
+
+def _append_to_file(path, chunk):
+    """Append chunk to path (create parents). Returns path string."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    cur = path.read_text(encoding="utf-8") if path.exists() else ""
+    sep = "" if (not cur or cur.endswith("\n")) else "\n"
+    path.write_text(cur + sep + chunk, encoding="utf-8")
+    return str(path)
+
+
+def memory_resolve_dest(dest):
+    """Map dest string → Path. dest: session|user|assistant|date|topic:<name>."""
+    ensure_memory_dirs()
+    d = (dest or "date").strip().lower()
+    if d == "session":
+        return MEMORY_SESSION, False  # plain append, not dated line
+    if d == "user":
+        return MEMORY_USER, False
+    if d == "assistant":
+        return MEMORY_ASSISTANT, False
+    if d == "date" or d == "":
+        return memory_date_path(), True
+    if d.startswith("topic:"):
+        name = d.split(":", 1)[1].strip()
+        return memory_topic_path(name), True
+    raise ValueError(
+        "dest must be session|user|assistant|date|topic:<name> (got %r)" % dest
+    )
+
+
+def memory_append(note, dest="date"):
+    """Append a note. dest: session|user|assistant|date|topic:<name> (default date)."""
     ensure_ws()
-    MEMORY_FILE.write_text(text or "", encoding="utf-8")
-    return {"ok": True, "path": str(MEMORY_FILE), "bytes": len((text or "").encode("utf-8"))}
-
-
-def memory_append(note):
-    """Append one lasting note to memory.md."""
-    ensure_ws()
-    cur = memory_load()
+    migrate_legacy_memory()
+    maybe_reset_session()
     add = (note or "").strip()
     if not add:
         return {"ok": False, "error": "Empty note"}
-    sep = "\n" if cur and not cur.endswith("\n") else ""
-    memory_save(cur + sep + add + "\n")
-    return {"ok": True, "path": str(MEMORY_FILE)}
+    try:
+        path, dated = memory_resolve_dest(dest)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    chunk = _dated_line(add) if dated else (add + "\n")
+    out = _append_to_file(path, chunk)
+    return {"ok": True, "path": out, "dest": (dest or "date").strip() or "date"}
+
+
+def memory_read(target=None):
+    """Read memory file(s). target: session|user|assistant|date|topic:<name>|all."""
+    ensure_ws()
+    migrate_legacy_memory()
+    maybe_reset_session()
+    t = (target or "all").strip().lower()
+    if t in ("", "all"):
+        # Combined dump (capped) for the model when no specific target.
+        parts = []
+        for label, path, cap in (
+            ("user", MEMORY_USER, 8000),
+            ("assistant", MEMORY_ASSISTANT, 8000),
+            ("date", memory_date_path(), 8000),
+            ("session", MEMORY_SESSION, 4000),
+        ):
+            body = _read_capped(path, cap).strip()
+            if body:
+                parts.append("### %s (%s)\n%s" % (label, path.name, body))
+        # List topic files briefly
+        topics = []
+        if MEMORY_TOPIC_DIR.exists():
+            for p in sorted(MEMORY_TOPIC_DIR.glob("*.md")):
+                if p.is_file() and p.stat().st_size > 0:
+                    topics.append(p.stem)
+        text = "\n\n".join(parts) if parts else ""
+        return {
+            "ok": True,
+            "target": "all",
+            "memory": text[:20000],
+            "topics": topics,
+        }
+    try:
+        if t.startswith("topic:"):
+            path, _ = memory_resolve_dest(t)
+        elif t in ("session", "user", "assistant", "date"):
+            path, _ = memory_resolve_dest(t)
+        else:
+            return {
+                "ok": False,
+                "error": "target must be session|user|assistant|date|topic:<name>|all",
+            }
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
+    body = ""
+    if path.exists():
+        body = path.read_text(encoding="utf-8")[:20000]
+    return {"ok": True, "target": t, "path": str(path), "memory": body}
+
+
+def memory_load():
+    """Legacy helper: combined memory text for callers expecting a string."""
+    res = memory_read("all")
+    return res.get("memory") or ""
 
 
 def build_system():
-    """System prompt = SYSTEM_BASE plus any notes from memory.md."""
-    mem = memory_load().strip()
-    if mem:
-        return SYSTEM_BASE + "\n\n## Memory (from workspace/memory.md)\n" + mem[:8000]
-    return SYSTEM_BASE
+    """System prompt = SYSTEM_BASE plus capped user/assistant/date/session notes."""
+    ensure_ws()
+    migrate_legacy_memory()
+    maybe_reset_session()
+    chunks = []
+    user = _read_capped(MEMORY_USER, _MEM_CAP_USER).strip()
+    if user:
+        chunks.append("## User facts (memory/user.md)\n" + user)
+    asst = _read_capped(MEMORY_ASSISTANT, _MEM_CAP_ASSISTANT).strip()
+    if asst:
+        chunks.append("## Assistant extras (memory/assistant.md)\n" + asst)
+    month = _read_capped(memory_date_path(), _MEM_CAP_DATE).strip()
+    if month:
+        chunks.append(
+            "## This month (memory/date/%s)\n" % memory_date_path().name + month
+        )
+    sess = _read_capped(MEMORY_SESSION, _MEM_CAP_SESSION).strip()
+    if sess:
+        chunks.append("## Session (memory/session.md)\n" + sess)
+    if not chunks:
+        return SYSTEM_BASE
+    return SYSTEM_BASE + "\n\n" + "\n\n".join(chunks)
 
 
 # ---------------------------------------------------------------------------
@@ -625,15 +811,29 @@ TOOL_DECLS = [
     },
     {
         "name": "memory_read",
-        "description": "Read long-term memory notes for this user",
-        "parameters": {"type": "object", "properties": {}},
+        "description": "Read memory. target: session|user|assistant|date|topic:<name>|all (default all)",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "session|user|assistant|date|topic:<name>|all",
+                }
+            },
+        },
     },
     {
         "name": "memory_append",
-        "description": "Append a lasting note to memory",
+        "description": "Append a note. dest: session|user|assistant|date|topic:<name> (default date = this month)",
         "parameters": {
             "type": "object",
-            "properties": {"note": {"type": "string"}},
+            "properties": {
+                "note": {"type": "string"},
+                "dest": {
+                    "type": "string",
+                    "description": "session|user|assistant|date|topic:<name>",
+                },
+            },
             "required": ["note"],
         },
     },
@@ -728,9 +928,9 @@ def dispatch(name, args):
         if name == "run_shell":
             return tool_run_shell(args["command"])
         if name == "memory_read":
-            return {"ok": True, "memory": memory_load()}
+            return memory_read(args.get("target"))
         if name == "memory_append":
-            return memory_append(args.get("note") or "")
+            return memory_append(args.get("note") or "", dest=args.get("dest") or "date")
         if name == "web_search":
             return tool_web_search(args.get("query") or "")
         if name == "reminder_add":

@@ -2,7 +2,7 @@
 
 Version: see `VERSION`.
 
-Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek).  
+Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek / OpenRouter / DeepInfra).  
 Works on **most Linux distros**.
 
 Install page: https://jor-teron.github.io/debian-ai-agent/
@@ -47,6 +47,8 @@ To **update** later, run the same install one-liner again (or `./install.sh` ins
 | xai (Grok) | `XAI_API_KEY` | https://console.x.ai/ |
 | anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com/ |
 | deepseek | `DEEPSEEK_API_KEY` | https://platform.deepseek.com/ |
+| openrouter | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
+| deepinfra | `DEEPINFRA_API_KEY` | https://deepinfra.com/dash/api_keys |
 
 In the page: **Provider → Model**.
 
@@ -66,7 +68,8 @@ Only your chat works. If it asks to run a command, reply **YES** or **NO**.
 - Local browser only (`127.0.0.1:9191`). Remote chat via optional Telegram above.  
 - Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`, `telegram.py`; `run.py` starts it.  
 - Keys only in `.env` (never commit).  
-- Files/tools: `/home/$USER/ai-workspace`  
+- Files/tools: `/home/$USER/ai-workspace`
+- Memory: `ai-workspace/memory/` (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topic/*.md`); legacy `memory.md` migrates once  
 - Shell: with `bwrap` installed, commands run freehand inside a bubblewrap sandbox (workspace RW, host tools RO). Without bubblewrap, Confirm in the UI (or YES/NO on Telegram) is still required.  
 - Stop: `systemctl --user stop debian-ai-agent`  
 - Manual run: `./run.sh`

@@ -27,7 +27,8 @@ HTML = r"""<!DOCTYPE html>
 html,body{height:100%;margin:0}
 body{font-family:system-ui,sans-serif;background:#0f1419;color:#e7ecf3;display:flex;flex-direction:column;height:100vh;overflow:hidden}
 header{flex:0 0 auto;padding:12px 16px;background:#1a2332;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border-bottom:1px solid #2a3548}
-h1{font-size:1.05rem;margin:0}
+h1{font-size:1.05rem;margin:0;display:flex;align-items:baseline;gap:8px}
+h1 .ver{font-size:.75rem;font-weight:500;color:#9aa8bc}
 .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .field{display:flex;gap:6px;align-items:center}
 label{font-size:.8rem;color:#9aa8bc;white-space:nowrap}
@@ -56,7 +57,7 @@ button:disabled{opacity:.5}
 .up{font-size:.75rem}
 </style></head><body>
 <header>
-  <h1>AI Agent</h1>
+  <h1>AI Agent <span class="ver" id="ver">…</span></h1>
   <div class="controls">
     <div id="status">…</div>
     <div class="field"><label for="provider">Provider</label>
@@ -117,12 +118,13 @@ function updateStatus(){
   const pid=provider.value;
   const has=!!keys[pid];
   const label=(catalog.providers[pid]&&catalog.providers[pid].label)||pid;
-  const ver=window._ver||'?';
+  const verEl=document.getElementById('ver');
+  if(verEl) verEl.textContent='v'+(window._ver||'?');
   if(has){
-    status.textContent='Ready · '+label+' · v'+ver;
+    status.textContent='Ready · '+label;
     status.className='ok';
   }else{
-    status.textContent='No key for '+label+' · v'+ver;
+    status.textContent='No key for '+label;
     status.className='bad';
   }
 }
