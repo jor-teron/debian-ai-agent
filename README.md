@@ -45,14 +45,14 @@ In the page: **Provider → Free/Paid → Model**.
 
 ## Telegram (optional)
 
-Chat from your phone without opening the LAN.
+Chat from your phone (PC stays on; browser not needed).
 
-1. In Telegram, talk to **@BotFather** → `/newbot` → copy the token.
-2. Put `TELEGRAM_BOT_TOKEN=…` in `~/debian-ai-agent/.env`.
-3. Restart, DM the bot once — it replies with your **chat id**. Set `TELEGRAM_ALLOWED_CHAT_ID=…` and restart again.
-4. Only that chat can talk to the agent. Shell confirm: reply **YES** or **NO**.
+1. In Telegram, open **@BotFather** → `/newbot` → copy the token.
+2. Put it in `.env` as `TELEGRAM_BOT_TOKEN=…` then restart the agent.
+3. Message your bot once — it replies with your **chat id**.
+4. Put that id in `.env` as `TELEGRAM_ALLOWED_CHAT_ID=…` and restart again.
 
-Uses long polling (no webhook / public URL). UI stays on `127.0.0.1:9191`.
+Only your chat works. If it asks to run a command, reply **YES** or **NO**.
 
 ## Notes
 
