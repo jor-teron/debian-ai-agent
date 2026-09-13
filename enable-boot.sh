@@ -9,6 +9,6 @@ mkdir -p "$UNIT_DIR"
 sed "s|%h/debian-ai-agent|$DIR|g" agent.service > "$UNIT_DIR/debian-ai-agent.service"
 systemctl --user daemon-reload
 systemctl --user enable --now debian-ai-agent.service
-echo "Running in background. Open http://127.0.0.1:8787"
+echo "Running in background. Open http://127.0.0.1:9191"
 echo "Stop:  systemctl --user stop debian-ai-agent"
 echo "Logs:  journalctl --user -u debian-ai-agent -f"

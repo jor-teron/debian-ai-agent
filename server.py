@@ -208,21 +208,4 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200 if result.get("ok") else 400, result)
 
 
-# ---------------------------------------------------------------------------
-# Startup helper (used by run.py for LAN tips)
-# ---------------------------------------------------------------------------
 
-
-def _lan_ips():
-    """Guess this PC's LAN IP (UDP connect trick; no packets are sent)."""
-    ips = []
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(("8.8.8.8", 80))
-            ips.append(s.getsockname()[0])
-        finally:
-            s.close()
-    except OSError:
-        pass
-    return ips

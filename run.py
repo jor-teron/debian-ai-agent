@@ -7,7 +7,7 @@ Stdlib only (no pip / venv / Apache). Local chat page uses HOST/PORT from .env.
 
 Code layout: config.py, tools.py, brain.py, ui.py, server.py, run.py
 
-Imports from: config.py (paths, version, keys), server.py (Handler, _lan_ips),
+Imports from: config.py (paths, version, keys), server.py (Handler),
               tools.py (background_loop).
 Used by: run.sh / systemd (python3 run.py). Nothing imports this file.
 """
@@ -30,7 +30,7 @@ if sys.version_info < (3, 8):
     sys.exit(1)
 
 from config import ENV_PATH, HOST, PORT, ROOT, WORKSPACE, app_version, default_provider, ensure_ws, keys_status
-from server import Handler, _lan_ips
+from server import Handler
 from tools import background_loop
 
 
@@ -50,13 +50,7 @@ def main():
     print("debian-ai-agent v%s" % app_version())
     print("Workspace: %s" % WORKSPACE)
     print("Default provider: %s" % default_provider())
-    print("Open http://%s:%s  (Ctrl+C to stop)" % (HOST if HOST != "0.0.0.0" else "127.0.0.1", PORT))
-    if HOST == "0.0.0.0":
-        tips = _lan_ips()
-        print("LAN access: set phone browser to http://<this-pc-ip>:%s" % PORT)
-        for ip in tips:
-            print("  e.g. http://%s:%s" % (ip, PORT))
-        print("(Same WiFi; firewall may need to allow TCP %s)" % PORT)
+    print("Open http://127.0.0.1:%s  (Ctrl+C to stop)" % PORT)
     keys = keys_status()
     if not any(keys.values()):
         print("WARNING: no provider API keys set in .env yet")

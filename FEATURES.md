@@ -19,7 +19,7 @@
 - Web search — Gemini Google Search tool (`web_search`); needs `GEMINI_API_KEY` even if chatting via another provider
 - Reminders — `reminders.json`, notify-send, `/api/reminders`
 - Scheduled jobs — `jobs.json` → `jobs_log.md` (uses default `PROVIDER`)
-- Phone/LAN — `HOST=0.0.0.0` in `.env`
+- Local UI on port **9191** (localhost only; Telegram for remote later)
 - `/api/models` — `{ providers: {…}, default_provider, default_model }`
 - `/api/health` — `keys` booleans per provider + `version`
 

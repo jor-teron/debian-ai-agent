@@ -27,7 +27,7 @@ nano ~/debian-ai-agent/.env
 systemctl --user restart debian-ai-agent
 ```
 
-Open http://127.0.0.1:8787
+Open http://127.0.0.1:9191
 
 (`install.sh` is also in the repo if you prefer `git clone` then `./install.sh`.)
 
@@ -45,10 +45,11 @@ In the page: **Provider → Free/Paid → Model**.
 
 ## Notes
 
+- Local browser only (`127.0.0.1:9191`). Remote chat via Telegram (coming next).  
+
 - Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`; `run.py` starts it.  
 - Keys only in `.env` (never commit).  
 - Files/tools: `/home/$USER/ai-agent`  
-- Phone on Wi‑Fi: `HOST=0.0.0.0` in `.env`, then restart.  
 - Shell runs need Confirm in the UI.  
 - Stop: `systemctl --user stop debian-ai-agent`  
 - Manual run: `./run.sh`
