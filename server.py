@@ -30,6 +30,8 @@ from tools import (
     cancel_pending_shell,
     confirm_pending_shell,
     safe_path,
+    shell_freehand,
+    shell_sandbox_mode,
     tool_reminder_list,
     tool_write_bytes,
     tool_write_file,
@@ -87,6 +89,8 @@ class Handler(BaseHTTPRequestHandler):
                     "host": HOST,
                     "port": PORT,
                     "default_provider": default_provider(),
+                    "shell_sandbox": shell_sandbox_mode(),
+                    "shell_freehand": shell_freehand(),
                     "due_reminders": [
                         {"id": r.get("id"), "text": r.get("text"), "due": r.get("due")} for r in due
                     ],

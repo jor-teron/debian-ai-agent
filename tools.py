@@ -2,7 +2,8 @@
 Workspace tools: files, shell, memory, reminders, jobs, web_search.
 
 The model calls these through brain.py → dispatch(). File and shell work is
-jailed to WORKSPACE. Shell commands wait for a Confirm click in the UI.
+jailed to WORKSPACE. Shell runs freehand inside bubblewrap when bwrap is on PATH;
+otherwise commands wait for UI Confirm / Telegram YES-NO.
 
 Imports from: config.py (paths, BLOCKED, SYSTEM_BASE, keys). Lazily imports
               brain.py for _http_json (search) and _plain_chat (jobs).
@@ -11,6 +12,7 @@ Used by: brain.py (dispatch, TOOL_DECLS, schemas, build_system),
          run.py (background_loop).
 """
 import json
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -128,35 +130,153 @@ def tool_write_bytes(path: str, data: bytes) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Shell (queue → UI Confirm/Cancel → run)
+# Shell sandbox (bubblewrap freehand when available; else UI/Telegram confirm)
 # ---------------------------------------------------------------------------
+# When `bwrap` is on PATH, shell commands run immediately inside bubblewrap:
+#   - WORKSPACE bind RW, cwd there
+#   - Host tools RO (/usr + /bin /sbin /lib /lib64 if present — usrmerge-safe)
+#   - Minimal RO: resolv.conf, ssl/ca-certificates, passwd/group; --dev / --proc
+#   - Network ON (no --unshare-net); --unshare-pid --die-with-parent
+#   - Still blocked by BLOCKED regex and sudo
+# Without bwrap: keep the old PENDING_SHELL → Confirm / Telegram YES-NO flow.
+
+
+_BWRAP_BIN = None  # None = not probed yet; "" = missing; else absolute path
+_BWRAP_BIND_TRY = None  # None = not probed; True/False = --ro-bind-try support
+
+
+def bwrap_available():
+    """True if bubblewrap (`bwrap`) is on PATH. Detected once per process."""
+    global _BWRAP_BIN
+    if _BWRAP_BIN is None:
+        _BWRAP_BIN = shutil.which("bwrap") or ""
+    return bool(_BWRAP_BIN)
+
+
+def shell_sandbox_mode():
+    """Return 'bwrap' when sandboxed freehand is active, else 'none'."""
+    return "bwrap" if bwrap_available() else "none"
+
+
+def shell_freehand():
+    """True when run_shell executes immediately (no Confirm / YES-NO)."""
+    return bwrap_available()
+
+
+def _bwrap_has_bind_try():
+    """Whether this bwrap supports --ro-bind-try (recent bubblewrap)."""
+    global _BWRAP_BIND_TRY
+    if _BWRAP_BIND_TRY is None:
+        if not bwrap_available():
+            _BWRAP_BIND_TRY = False
+        else:
+            try:
+                p = subprocess.run(
+                    [_BWRAP_BIN, "--help"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                help_text = (p.stdout or "") + (p.stderr or "")
+                _BWRAP_BIND_TRY = "--ro-bind-try" in help_text
+            except (OSError, subprocess.TimeoutExpired):
+                _BWRAP_BIND_TRY = False
+    return _BWRAP_BIND_TRY
+
+
+def _ro_bind(argv, src, dest=None):
+    """Append a read-only bind; use --ro-bind-try when available, else exist-check."""
+    dest = dest or src
+    if _bwrap_has_bind_try():
+        argv.extend(["--ro-bind-try", src, dest])
+    elif Path(src).exists():
+        argv.extend(["--ro-bind", src, dest])
+
+
+def _build_bwrap_argv(cmd):
+    """Build argv: bwrap … -- /bin/bash -lc <cmd> (cwd = WORKSPACE).
+
+    Skips --new-session so subprocess can still capture stdout/stderr cleanly.
+    """
+    ws = str(WORKSPACE.resolve())
+    argv = [
+        _BWRAP_BIN or "bwrap",
+        "--die-with-parent",
+        "--unshare-pid",
+        # Network stays shared (do NOT pass --unshare-net).
+        "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        "--ro-bind", "/usr", "/usr",
+    ]
+    # Debian usrmerge: /bin may be a symlink into /usr; bind only if present.
+    for p in ("/bin", "/sbin", "/lib", "/lib64"):
+        if Path(p).exists():
+            argv.extend(["--ro-bind", p, p])
+
+    # DNS + TLS roots + passwd/group (some tools look these up).
+    if Path("/etc/resolv.conf").exists():
+        argv.extend(["--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf"])
+    _ro_bind(argv, "/etc/ssl")
+    _ro_bind(argv, "/etc/ca-certificates")
+    _ro_bind(argv, "/etc/passwd")
+    _ro_bind(argv, "/etc/group")
+
+    argv.extend(
+        [
+            "--bind", ws, ws,
+            "--chdir", ws,
+            "--dev", "/dev",
+            "--proc", "/proc",
+            "--",
+            "/bin/bash", "-lc", cmd,
+        ]
+    )
+    return argv
 
 
 def _shell_execute(cmd):
-    """Run a command in the workspace with a 30s timeout. Internal only."""
+    """Run a command in the workspace with a 30s timeout. Internal only.
+
+    With bwrap: argv = bubblewrap wrap around bash -lc. Without: shell=True as before.
+    """
     try:
-        p = subprocess.run(
-            cmd, shell=True, cwd=str(WORKSPACE), capture_output=True, text=True, timeout=30
-        )
-        return {
+        if bwrap_available():
+            p = subprocess.run(
+                _build_bwrap_argv(cmd),
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        else:
+            p = subprocess.run(
+                cmd, shell=True, cwd=str(WORKSPACE), capture_output=True, text=True, timeout=30
+            )
+        out = {
             "ok": p.returncode == 0,
             "exit_code": p.returncode,
             "stdout": p.stdout[-40000:],
             "stderr": p.stderr[-10000:],
             "command": cmd,
         }
+        if bwrap_available():
+            out["sandbox"] = "bwrap"
+        return out
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "Timed out", "command": cmd}
 
 
 def tool_run_shell(command, confirmed=False):
-    """Queue shell for user confirm unless confirmed=True."""
+    """Run shell freehand when sandboxed; else queue until confirmed=True."""
     ensure_ws()
     cmd = (command or "").strip()
     if not cmd:
         return {"ok": False, "error": "Empty command"}
     if BLOCKED.search(cmd) or cmd.startswith("sudo"):
         return {"ok": False, "error": "Command blocked for safety"}
+    # Freehand path: bwrap on PATH → execute now (no PENDING_SHELL / needs_confirm).
+    if shell_freehand():
+        if PENDING_SHELL.exists():
+            PENDING_SHELL.unlink()
+        return _shell_execute(cmd)
     if not confirmed:
         PENDING_SHELL.write_text(json.dumps({"command": cmd}), encoding="utf-8")
         return {
@@ -496,7 +616,7 @@ TOOL_DECLS = [
     },
     {
         "name": "run_shell",
-        "description": "Propose a shell command (cwd=workspace). User must confirm in UI before it runs.",
+        "description": "Run a shell command (cwd=workspace). Sandboxed freehand when bubblewrap is available; otherwise user must Confirm in UI / YES-NO on Telegram.",
         "parameters": {
             "type": "object",
             "properties": {"command": {"type": "string"}},

@@ -10,6 +10,7 @@ Install page: https://jor-teron.github.io/debian-ai-agent/
 
 - Python **3.8+** (`python3`)
 - `git`
+- `bubblewrap` (`bwrap`) — optional but recommended; enables sandboxed shell freehand
 - At least one provider API key (see below)
 
 ## Install
@@ -61,6 +62,6 @@ Only your chat works. If it asks to run a command, reply **YES** or **NO**.
 - Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`, `telegram.py`; `run.py` starts it.  
 - Keys only in `.env` (never commit).  
 - Files/tools: `/home/$USER/ai-agent`  
-- Shell runs need Confirm in the UI (or YES/NO on Telegram).  
+- Shell: with `bwrap` installed, commands run freehand inside a bubblewrap sandbox (workspace RW, host tools RO). Without bubblewrap, Confirm in the UI (or YES/NO on Telegram) is still required.  
 - Stop: `systemctl --user stop debian-ai-agent`  
 - Manual run: `./run.sh`

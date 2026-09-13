@@ -12,7 +12,8 @@
 - Files + shell in `/home/$USER/ai-agent`
 - Background + start at login
 - Memory — `memory.md`; tools + injected into system prompt
-- Confirm before shell; success shows "Done." — sticky amber bar above the text box (Confirm/Cancel)
+- Shell sandbox — bubblewrap (`bwrap`) when available: freehand run inside sandbox (workspace RW, tools RO, network on); without bwrap, Confirm / Telegram YES-NO as before; BLOCKED + sudo still refused
+- Confirm before shell (fallback when no bwrap); success shows "Done." — sticky amber bar above the text box (Confirm/Cancel)
 - Enter sends; Shift+Enter new line
 - Dark mode by default
 - Upload / download in the page
@@ -22,7 +23,7 @@
 - Local UI on port **9191** (localhost only)
 - **Telegram optional bridge** — long-poll DMs when `TELEGRAM_BOT_TOKEN` is set; allow-list via `TELEGRAM_ALLOWED_CHAT_ID`; same `run_chat` + YES/NO shell confirm; no webhook
 - `/api/models` — `{ providers: {…}, default_provider, default_model }`
-- `/api/health` — `keys` booleans per provider + `version`
+- `/api/health` — `keys` booleans per provider + `version` + `shell_sandbox` (`bwrap`|`none`) + `shell_freehand`
 
 ## Later
 7. Command allow-list

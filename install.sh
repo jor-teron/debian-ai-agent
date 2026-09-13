@@ -3,7 +3,7 @@
 # debian-ai-agent — one-shot installer
 # =============================================================================
 # What this does:
-#   1) Makes sure python3 + git exist (apt on Debian/Ubuntu if needed)
+#   1) Makes sure python3 + git + bubblewrap exist (apt on Debian/Ubuntu if needed)
 #   2) Clones or updates the repo into ~/debian-ai-agent
 #   3) Creates .env from the example if missing
 #   4) Enables the user background service (starts at login)
@@ -37,16 +37,18 @@ need_cmd() {
 }
 
 # ---------------------------------------------------------------------------
-# Dependencies (python3 + git)
+# Dependencies (python3 + git + bubblewrap)
 # ---------------------------------------------------------------------------
 
 install_deps() {
   missing=""
   need_cmd python3 || missing="$missing python3"
   need_cmd git || missing="$missing git"
+  # Package name is bubblewrap; binary is bwrap (enables sandboxed shell freehand).
+  need_cmd bwrap || missing="$missing bubblewrap"
 
   if [ -z "$missing" ]; then
-    say "Dependencies OK (python3, git)."
+    say "Dependencies OK (python3, git, bubblewrap)."
     return 0
   fi
 
