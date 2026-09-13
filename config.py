@@ -112,14 +112,14 @@ PROVIDERS = {
         "env_key": "GEMINI_API_KEY",
         "kind": "gemini",
         "models": [
+            "gemini-3.5-flash-lite",
             "gemini-3.5-flash",
             "gemini-3.6-flash",
-            "gemini-3.5-flash-lite",
             "gemini-3.6-pro",
             "gemini-3.5-pro",
             "gemini-2.5-pro",
         ],
-        "default": "gemini-3.5-flash",
+        "default": "gemini-3.5-flash-lite",
     },
     "openai": {
         "label": "OpenAI (ChatGPT)",

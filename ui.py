@@ -88,7 +88,7 @@ const model=document.getElementById('model');
 const status=document.getElementById('status'),input=document.getElementById('input'),send=document.getElementById('send');
 const note=document.getElementById('note'),confirmBar=document.getElementById('confirm'),pendingCmd=document.getElementById('pendingCmd');
 const fileInput=document.getElementById('file');
-let catalog={providers:{},default_provider:'gemini',default_model:'gemini-3.5-flash'}, history=[], keys={};
+let catalog={providers:{},default_provider:'gemini',default_model:'gemini-3.5-flash-lite'}, history=[], keys={};
 function fillProviders(){
   provider.innerHTML='';
   Object.keys(catalog.providers||{}).forEach(pid=>{
