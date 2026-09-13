@@ -43,13 +43,24 @@ Open http://127.0.0.1:9191
 
 In the page: **Provider → Free/Paid → Model**.
 
+## Telegram (optional)
+
+Chat from your phone without opening the LAN.
+
+1. In Telegram, talk to **@BotFather** → `/newbot` → copy the token.
+2. Put `TELEGRAM_BOT_TOKEN=…` in `~/debian-ai-agent/.env`.
+3. Restart, DM the bot once — it replies with your **chat id**. Set `TELEGRAM_ALLOWED_CHAT_ID=…` and restart again.
+4. Only that chat can talk to the agent. Shell confirm: reply **YES** or **NO**.
+
+Uses long polling (no webhook / public URL). UI stays on `127.0.0.1:9191`.
+
 ## Notes
 
-- Local browser only (`127.0.0.1:9191`). Remote chat via Telegram (coming next).  
+- Local browser only (`127.0.0.1:9191`). Remote chat via optional Telegram above.  
 
-- Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`; `run.py` starts it.  
+- Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`, `telegram.py`; `run.py` starts it.  
 - Keys only in `.env` (never commit).  
 - Files/tools: `/home/$USER/ai-agent`  
-- Shell runs need Confirm in the UI.  
+- Shell runs need Confirm in the UI (or YES/NO on Telegram).  
 - Stop: `systemctl --user stop debian-ai-agent`  
 - Manual run: `./run.sh`

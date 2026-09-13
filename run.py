@@ -5,10 +5,10 @@ Minimal personal AI agent for Debian — launcher.
 Starts the HTTP server and a background thread for reminders/jobs.
 Stdlib only (no pip / venv / Apache). Local chat page uses HOST/PORT from .env.
 
-Code layout: config.py, tools.py, brain.py, ui.py, server.py, run.py
+Code layout: config.py, tools.py, brain.py, ui.py, server.py, telegram.py, run.py
 
 Imports from: config.py (paths, version, keys), server.py (Handler),
-              tools.py (background_loop).
+              tools.py (background_loop), telegram.py (optional DM bridge).
 Used by: run.sh / systemd (python3 run.py). Nothing imports this file.
 """
 import sys
@@ -32,6 +32,7 @@ if sys.version_info < (3, 8):
 from config import ENV_PATH, HOST, PORT, ROOT, WORKSPACE, app_version, default_provider, ensure_ws, keys_status
 from server import Handler
 from tools import background_loop
+from telegram import start_telegram_thread
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +47,10 @@ def main():
         print("Tip: copy .env.example to .env and add provider API keys")
     t = threading.Thread(target=background_loop, name="reminders-jobs", daemon=True)
     t.start()
+    if start_telegram_thread():
+        print("Telegram: on")
+    else:
+        print("Telegram: off (no token)")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
     print("debian-ai-agent v%s" % app_version())
     print("Workspace: %s" % WORKSPACE)

@@ -2,7 +2,7 @@
 # Features
 
 ## Now
-- **Modular layout** — `config.py` / `tools.py` / `brain.py` / `ui.py` / `server.py` / `run.py` (stdlib only; same behavior as the old single-file app)
+- **Modular layout** — `config.py` / `tools.py` / `brain.py` / `ui.py` / `server.py` / `telegram.py` / `run.py` (stdlib only; same behavior as the old single-file app)
 - **Multi-provider chat** — Provider → Free/Paid → Model in the UI
   - **gemini** — Gemini generateContent + function calling (`GEMINI_API_KEY`)
   - **openai** — Chat Completions + tools (`OPENAI_API_KEY`); free: `gpt-4o-mini`, `gpt-4.1-mini`; paid: `gpt-4o`, `gpt-4.1`
@@ -19,7 +19,8 @@
 - Web search — Gemini Google Search tool (`web_search`); needs `GEMINI_API_KEY` even if chatting via another provider
 - Reminders — `reminders.json`, notify-send, `/api/reminders`
 - Scheduled jobs — `jobs.json` → `jobs_log.md` (uses default `PROVIDER`)
-- Local UI on port **9191** (localhost only; Telegram for remote later)
+- Local UI on port **9191** (localhost only)
+- **Telegram optional bridge** — long-poll DMs when `TELEGRAM_BOT_TOKEN` is set; allow-list via `TELEGRAM_ALLOWED_CHAT_ID`; same `run_chat` + YES/NO shell confirm; no webhook
 - `/api/models` — `{ providers: {…}, default_provider, default_model }`
 - `/api/health` — `keys` booleans per provider + `version`
 

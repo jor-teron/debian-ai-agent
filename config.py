@@ -6,7 +6,7 @@ and the system prompt. Other modules import names from here — nothing
 imports this file for side effects except the path constants.
 
 Imports from: stdlib only (os, re, pathlib).
-Used by: tools.py, brain.py, server.py, run.py.
+Used by: tools.py, brain.py, server.py, run.py, telegram.py.
 """
 import os
 import re
@@ -63,7 +63,7 @@ def _workspace_path():
 def _host_port():
     """Listen address: always localhost. Port from .env (default 9191).
 
-    LAN / 0.0.0.0 phone access was removed — use Telegram for remote chat later.
+    LAN / 0.0.0.0 phone access was removed — use optional Telegram for remote chat.
     """
     env = _read_dotenv()
     # Local browser UI only (no 0.0.0.0 / LAN exposure).
@@ -233,6 +233,41 @@ def allowed(provider, model):
         return model
     d = meta["default"]
     return d if d in all_m else meta["free"][0]
+
+
+
+# ---------------------------------------------------------------------------
+# Optional Telegram bridge (remote DMs; UI stays on localhost)
+# ---------------------------------------------------------------------------
+# HOST stays 127.0.0.1. Telegram is the remote path: set TELEGRAM_BOT_TOKEN
+# (and TELEGRAM_ALLOWED_CHAT_ID) in .env; run.py starts a long-poll thread.
+
+
+def telegram_bot_token():
+    """BotFather token from .env, or empty if Telegram is off."""
+    return _env_get("TELEGRAM_BOT_TOKEN")
+
+
+def telegram_allowed_chat_id():
+    """DM allow-list chat id (string). Empty → bot replies with the caller's id only."""
+    return _env_get("TELEGRAM_ALLOWED_CHAT_ID")
+
+
+def telegram_provider():
+    """Optional TELEGRAM_PROVIDER, else config default_provider()."""
+    p = (_env_get("TELEGRAM_PROVIDER") or "").lower()
+    if p and p in PROVIDERS:
+        return p
+    return default_provider()
+
+
+def telegram_model():
+    """Optional TELEGRAM_MODEL for the Telegram provider, else that provider's default."""
+    provider = telegram_provider()
+    m = _env_get("TELEGRAM_MODEL")
+    if m:
+        return allowed(provider, m)
+    return default_model(provider)
 
 
 def ensure_ws():
