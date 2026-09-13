@@ -41,7 +41,7 @@ Open http://127.0.0.1:9191
 | anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com/ |
 | deepseek | `DEEPSEEK_API_KEY` | https://platform.deepseek.com/ |
 
-In the page: **Provider → Free/Paid → Model**.
+In the page: **Provider → Model**.
 
 ## Telegram (optional)
 

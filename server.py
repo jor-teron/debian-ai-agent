@@ -94,9 +94,9 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/models":
-            # Provider catalog for the Provider / Free-Paid / Model dropdowns
+            # Provider catalog for the Provider / Model dropdowns (no free/paid split)
             providers = {
-                pid: {"free": list(meta["free"]), "paid": list(meta["paid"])}
+                pid: {"models": list(meta.get("models") or [])}
                 for pid, meta in PROVIDERS.items()
             }
             dp = default_provider()

@@ -3,7 +3,7 @@
 
 ## Now
 - **Modular layout** — `config.py` / `tools.py` / `brain.py` / `ui.py` / `server.py` / `telegram.py` / `run.py` (stdlib only; same behavior as the old single-file app)
-- **Multi-provider chat** — Provider → Free/Paid → Model in the UI
+- **Multi-provider chat** — Provider → Model → Model in the UI
   - **gemini** — Gemini generateContent + function calling (`GEMINI_API_KEY`)
   - **openai** — Chat Completions + tools (`OPENAI_API_KEY`); free: `gpt-4o-mini`, `gpt-4.1-mini`; paid: `gpt-4o`, `gpt-4.1`
   - **xai** — OpenAI-compatible at `https://api.x.ai/v1` (`XAI_API_KEY`); free: `grok-4.3`, `grok-3-mini` (legacy); paid: `grok-4.6`, `grok-4.5` (2026-09 public catalog)
@@ -12,7 +12,7 @@
 - Files + shell in `/home/$USER/ai-agent`
 - Background + start at login
 - Memory — `memory.md`; tools + injected into system prompt
-- Confirm before shell — sticky amber bar above the text box (Confirm/Cancel)
+- Confirm before shell; success shows "Done." — sticky amber bar above the text box (Confirm/Cancel)
 - Enter sends; Shift+Enter new line
 - Dark mode by default
 - Upload / download in the page

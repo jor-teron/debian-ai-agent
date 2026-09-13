@@ -162,156 +162,17 @@ def _handle_shell_reply(chat_id, text, token=None):
         if result.get("ok"):
             stdout = (result.get("stdout") or "").strip()
             stderr = (result.get("stderr") or "").strip()
+            body = []
             if stdout:
-                out_parts.append(stdout)
+                body.append(stdout)
             if stderr:
-                out_parts.append("stderr:\n" + stderr)
-            if not out_parts:
-                out_parts.append("(ok, no output)")
+                body.append(stderr)
+            if body:
+                out_parts.append("Done.\n" + "\n".join(body))
+            else:
+                out_parts.append("Done.")
         else:
-            out_parts.append("Shell failed: %s" % (result.get("error") or result))
+            out_parts.append(result.get("error") or "Command failed")
         send_text(chat_id, "\n".join(out_parts), token=token)
-        return True
-    if low in ("no", "n"):
-        cancel_pending_shell()
-        _last_shell_prompt.pop(chat_id, None)
-        send_text(chat_id, "Shell cancelled.", token=token)
-        return True
-    # Pending but not YES/NO — require a clear answer first.
-    send_text(chat_id, "Pending shell — reply YES or NO", token=token)
-    maybe_prompt_shell_confirm(chat_id, token=token)
-    return True
 
 
-# ---------------------------------------------------------------------------
-# Message handling + short history
-# ---------------------------------------------------------------------------
-
-
-def _history_for(chat_id):
-    """Return (and keep) the in-memory history list for this chat."""
-    with _lock:
-        if chat_id not in _histories:
-            _histories[chat_id] = []
-        return _histories[chat_id]
-
-
-def _append_history(chat_id, role, content):
-    """Append one turn and trim to _HISTORY_MAX entries."""
-    hist = _history_for(chat_id)
-    hist.append({"role": role, "content": content})
-    if len(hist) > _HISTORY_MAX:
-        del hist[: len(hist) - _HISTORY_MAX]
-
-
-def handle_message(update, token=None):
-    """Process one Telegram update (private text only)."""
-    msg = update.get("message") or update.get("edited_message")
-    if not msg:
-        return
-    chat = msg.get("chat") or {}
-    # v1: private DMs only
-    if (chat.get("type") or "") != "private":
-        return
-    # Ignore non-text (stickers, photos, …)
-    text = msg.get("text")
-    if text is None:
-        return
-    text = str(text).strip()
-    if not text:
-        return
-    chat_id = chat.get("id")
-    if chat_id is None:
-        return
-
-    # Allow-list: if unset, tell them their chat id and do not run the agent.
-    if not _allowed_id_str():
-        send_text(
-            chat_id,
-            "Your Telegram chat id is: %s\n"
-            "Add this to .env and restart:\n"
-            "TELEGRAM_ALLOWED_CHAT_ID=%s" % (chat_id, chat_id),
-            token=token,
-        )
-        return
-
-    if not _is_allowed(chat_id):
-        # Quietly ignore unknown chats (no info leak).
-        return
-
-    # Shell confirm takes priority over normal chat.
-    if _handle_shell_reply(chat_id, text, token=token):
-        return
-
-    provider = telegram_provider()
-    model = telegram_model()
-    hist = list(_history_for(chat_id))
-    result = run_chat(text, provider=provider, model=model, history=hist)
-    reply = (result.get("reply") or "").strip()
-    if not result.get("ok"):
-        err = result.get("error") or "chat failed"
-        reply = reply or ("Error: %s" % err)
-    if not reply:
-        reply = "(No reply)"
-    send_text(chat_id, reply, token=token)
-    _append_history(chat_id, "user", text)
-    _append_history(chat_id, "assistant", reply)
-
-    # After the chat reply, prompt for shell confirm if tools queued one.
-    maybe_prompt_shell_confirm(chat_id, token=token)
-
-
-# ---------------------------------------------------------------------------
-# Long-polling loop
-# ---------------------------------------------------------------------------
-
-
-def _poll_loop(token):
-    """Long-poll getUpdates forever (daemon thread). Uses offset to ack updates."""
-    offset = None
-    # Verify token once (mask in any print — we only print a short status).
-    me = api_call("getMe", token=token)
-    if not me.get("ok"):
-        print("Telegram: getMe failed — check TELEGRAM_BOT_TOKEN")
-        return
-    while True:
-        params = {"timeout": _POLL_TIMEOUT}
-        if offset is not None:
-            params["offset"] = offset
-        try:
-            # getUpdates with long poll — pass timeout in params.
-            res = api_call("getUpdates", params, token=token)
-        except Exception:  # noqa: BLE001
-            time.sleep(3)
-            continue
-        if not res.get("ok"):
-            # Transient network / 429 — back off briefly.
-            time.sleep(3)
-            continue
-        for upd in res.get("result") or []:
-            uid = upd.get("update_id")
-            if uid is not None:
-                offset = uid + 1
-            try:
-                handle_message(upd, token=token)
-            except Exception as e:  # noqa: BLE001
-                # Never crash the poller on one bad message.
-                print("Telegram: handle error: %s" % e)
-
-
-def start_telegram_thread():
-    """Start the Telegram poller as a daemon thread if a token is set.
-
-    No token → no-op (safe to call always). Returns True if started.
-    """
-    token = telegram_bot_token()
-    if not token:
-        return False
-    t = threading.Thread(
-        target=_poll_loop,
-        args=(token,),
-        name="telegram-poll",
-        daemon=True,
-    )
-    t.start()
-    return True

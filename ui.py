@@ -12,7 +12,7 @@ Used by: server.py (GET / and /index.html serve HTML).
 # Page markup
 # ---------------------------------------------------------------------------
 
-# Full chat page: header (provider/model), message log, sticky confirm dock,
+# Full chat page: header (status, provider, model), message log, sticky confirm dock,
 # and the composer. Dark by default (color-scheme). Enter sends; Shift+Enter
 # is a new line. Confirm/Cancel appear when a shell command is pending.
 HTML = r"""<!DOCTYPE html>
@@ -28,11 +28,12 @@ html,body{height:100%;margin:0}
 body{font-family:system-ui,sans-serif;background:#0f1419;color:#e7ecf3;display:flex;flex-direction:column;height:100vh;overflow:hidden}
 header{flex:0 0 auto;padding:12px 16px;background:#1a2332;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border-bottom:1px solid #2a3548}
 h1{font-size:1.05rem;margin:0}
-.controls{display:flex;gap:8px;flex-wrap:wrap;align-items:end}
-label{font-size:.75rem;color:#9aa8bc;display:block}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.field{display:flex;gap:6px;align-items:center}
+label{font-size:.8rem;color:#9aa8bc;white-space:nowrap}
 select,button,textarea,input[type=file]{font:inherit;border-radius:8px;border:1px solid #2a3548;background:#0c1118;color:#e7ecf3}
 select{padding:6px 8px}
-#status{font-size:.8rem;color:#9aa8bc;max-width:320px}
+#status{font-size:.8rem;color:#9aa8bc;max-width:360px;margin-right:4px}
 #status.ok{color:#6ee7b7}#status.bad{color:#f87171}
 #note{flex:0 0 auto;font-size:.75rem;color:#fbbf24;padding:0 16px;min-height:0}
 #log{flex:1 1 auto;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:0}
@@ -57,14 +58,13 @@ button:disabled{opacity:.5}
 <header>
   <h1>AI Agent</h1>
   <div class="controls">
-    <div><label>Provider</label>
+    <div id="status">…</div>
+    <div class="field"><label for="provider">Provider</label>
       <select id="provider"></select>
     </div>
-    <div><label>Category</label>
-      <select id="tier"><option value="free" selected>Free</option><option value="paid">Paid</option></select>
+    <div class="field"><label for="model">Model</label>
+      <select id="model"></select>
     </div>
-    <div><label>Model</label><select id="model"></select></div>
-    <div id="status">…</div>
   </div>
 </header>
 <div id="note"></div>
@@ -84,11 +84,11 @@ button:disabled{opacity:.5}
 </div>
 <script>
 const log=document.getElementById('log'),provider=document.getElementById('provider');
-const tier=document.getElementById('tier'),model=document.getElementById('model');
+const model=document.getElementById('model');
 const status=document.getElementById('status'),input=document.getElementById('input'),send=document.getElementById('send');
 const note=document.getElementById('note'),confirmBar=document.getElementById('confirm'),pendingCmd=document.getElementById('pendingCmd');
 const fileInput=document.getElementById('file');
-let catalog={providers:{},default_provider:'gemini',default_model:'gemini-3.6-flash'}, history=[], keys={};
+let catalog={providers:{},default_provider:'gemini',default_model:'gemini-3.5-flash'}, history=[], keys={};
 function fillProviders(){
   provider.innerHTML='';
   Object.keys(catalog.providers||{}).forEach(pid=>{
@@ -99,8 +99,8 @@ function fillProviders(){
   else if(catalog.default_provider && catalog.providers[catalog.default_provider]) provider.value=catalog.default_provider;
 }
 function fillModels(){
-  const p=catalog.providers[provider.value]||{free:[],paid:[]};
-  const list=p[tier.value]||[];
+  const p=catalog.providers[provider.value]||{models:[]};
+  const list=p.models||[];
   model.innerHTML='';
   list.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;model.appendChild(o);});
   const key='m:'+provider.value;
@@ -114,7 +114,7 @@ function updateStatus(){
   const pid=provider.value;
   const has=!!keys[pid];
   const wsLabel=(window._ws||'').replace(/^.*\//,'…/');
-  status.textContent=(has?(pid+' key OK'):(pid+' key missing — edit .env'))+' · v'+(window._ver||'?')+' · '+wsLabel;
+  status.textContent=(has?'key OK ('+pid+')':('key missing ('+pid+') — edit .env'))+' · v'+(window._ver||'?')+' · '+wsLabel;
   status.className=has?'ok':'bad';
 }
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -149,18 +149,16 @@ async function boot(){
     const m=await fetch('/api/models').then(r=>r.json());
     catalog={providers:m.providers||{},default_provider:m.default_provider||'gemini',default_model:m.default_model||''};
     fillProviders();
-    const t=localStorage.getItem('t'); if(t==='paid'||t==='free') tier.value=t;
     fillModels();
     updateStatus();
     await refreshPending();
   }catch(e){status.textContent='Cannot reach server'; status.className='bad';}
 }
 provider.onchange=()=>{localStorage.setItem('p',provider.value); fillModels(); updateStatus();};
-tier.onchange=()=>{localStorage.setItem('t',tier.value); fillModels();};
 model.onchange=()=>localStorage.setItem('m:'+provider.value,model.value);
 document.getElementById('btnConfirm').onclick=async()=>{
   const res=await fetch('/api/confirm',{method:'POST'}).then(r=>r.json());
-  add('bot', res.ok?('Shell OK (exit '+(res.exit_code??'?')+'):\n'+(res.stdout||'')+(res.stderr?('\n'+res.stderr):'')):(res.error||'Confirm failed'));
+  add('bot', res.ok?('Done.'+((res.stdout||res.stderr)?('\n'+(res.stdout||'')+(res.stderr?('\n'+res.stderr):'')):'')):(res.error||'Confirm failed'));
   refreshPending();
 };
 document.getElementById('btnCancel').onclick=async()=>{

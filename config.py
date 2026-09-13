@@ -103,24 +103,30 @@ HOST, PORT = _host_port()
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 # Each provider: display label, env var for the key, API "kind"
-# (gemini / openai / anthropic), free+paid model lists, and a default model.
+# (gemini / openai / anthropic), one models list, and a default model.
 # kind "openai" means Chat Completions (OpenAI, xAI, DeepSeek).
+# No free/paid split in the UI — almost all keys are paid except Gemini.
 PROVIDERS = {
     "gemini": {
         "label": "Gemini",
         "env_key": "GEMINI_API_KEY",
         "kind": "gemini",
-        "free": ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"],
-        "paid": ["gemini-3.6-pro", "gemini-3.5-pro", "gemini-2.5-pro"],
-        "default": "gemini-3.6-flash",
+        "models": [
+            "gemini-3.5-flash",
+            "gemini-3.6-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-pro",
+            "gemini-3.5-pro",
+            "gemini-2.5-pro",
+        ],
+        "default": "gemini-3.5-flash",
     },
     "openai": {
         "label": "OpenAI (ChatGPT)",
         "env_key": "OPENAI_API_KEY",
         "kind": "openai",
         "base": "https://api.openai.com/v1",
-        "free": ["gpt-4o-mini", "gpt-4.1-mini"],
-        "paid": ["gpt-4o", "gpt-4.1"],
+        "models": ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o", "gpt-4.1"],
         "default": "gpt-4o-mini",
     },
     "xai": {
@@ -128,8 +134,7 @@ PROVIDERS = {
         "env_key": "XAI_API_KEY",
         "kind": "openai",
         "base": "https://api.x.ai/v1",
-        "free": ["grok-4.3", "grok-3-mini"],
-        "paid": ["grok-4.6", "grok-4.5"],
+        "models": ["grok-4.3", "grok-3-mini", "grok-4.6", "grok-4.5"],
         "default": "grok-4.3",
     },
     "anthropic": {
@@ -137,8 +142,7 @@ PROVIDERS = {
         "env_key": "ANTHROPIC_API_KEY",
         "kind": "anthropic",
         "base": "https://api.anthropic.com/v1",
-        "free": ["claude-haiku-4-5"],
-        "paid": ["claude-sonnet-5", "claude-sonnet-4-6"],
+        "models": ["claude-haiku-4-5", "claude-sonnet-5", "claude-sonnet-4-6"],
         "default": "claude-haiku-4-5",
     },
     "deepseek": {
@@ -146,8 +150,7 @@ PROVIDERS = {
         "env_key": "DEEPSEEK_API_KEY",
         "kind": "openai",
         "base": "https://api.deepseek.com/v1",
-        "free": ["deepseek-chat"],
-        "paid": ["deepseek-reasoner"],
+        "models": ["deepseek-chat", "deepseek-reasoner"],
         "default": "deepseek-chat",
     },
 }
@@ -223,16 +226,16 @@ def default_model(provider=None):
 
 
 def allowed(provider, model):
-    """Return model if it is in that provider's free/paid lists; else the default."""
+    """Return model if it is in that provider's models list; else the default."""
     meta = PROVIDERS.get(provider)
     if not meta:
         provider = default_provider()
         meta = PROVIDERS[provider]
-    all_m = set(meta["free"]) | set(meta["paid"])
+    all_m = set(meta.get("models") or [])
     if model and model in all_m:
         return model
     d = meta["default"]
-    return d if d in all_m else meta["free"][0]
+    return d if d in all_m else (meta["models"][0] if meta.get("models") else d)
 
 
 
