@@ -1,22 +1,10 @@
 #!/bin/sh
 # =============================================================================
-# AI Agent — one-shot installer (most Linux distros)
+# AI Agent — quiet one-shot installer
 # =============================================================================
-# What this does:
-#   1) Detects the host package manager; installs python3 + git (required)
-#   2) Optionally installs bubblewrap (ask, or INSTALL_BWRAP=1/0)
-#   3) Clones or updates the repo into ~/debian-ai-agent
-#   4) Creates .env from the example if missing
-#   5) Enables the user background service when systemd is available
-#
-# How people run it (one line):
-#   curl -fsSL https://raw.githubusercontent.com/jor-teron/debian-ai-agent/main/install.sh | bash
-#
-# Optional:
-#   INSTALL_BWRAP=1  — try bubblewrap without asking (still continues if it fails)
-#   INSTALL_BWRAP=0  — never install bubblewrap
-#
-# Package managers tried (first match): apt-get, dnf, yum, pacman, zypper, apk
+# Required: python3, git. Optional: bubblewrap (always asks [y/N] on /dev/tty).
+# INSTALL_BWRAP=0|1 skips the question.
+# curl -fsSL …/install.sh | bash
 # =============================================================================
 
 set -e
@@ -24,241 +12,170 @@ set -e
 REPO_URL="https://github.com/jor-teron/debian-ai-agent.git"
 INSTALL_DIR="${HOME}/debian-ai-agent"
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+say() { printf '%s\n' "$*"; }
 
-say() {
-  printf '%s\n' "$*"
-}
-
-need_cmd() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-# ---------------------------------------------------------------------------
-# Host / package manager detection
-# ---------------------------------------------------------------------------
+need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 detect_pkg() {
   for pm in apt-get dnf yum pacman zypper apk; do
-    if need_cmd "$pm"; then
-      echo "$pm"
-      return 0
-    fi
+    need_cmd "$pm" && { echo "$pm"; return 0; }
   done
   echo none
   return 1
 }
 
-show_host() {
-  if [ -f /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    say "Host: ${PRETTY_NAME:-$NAME}"
-  fi
-}
-
 run_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  else
-    sudo "$@"
+  if [ "$(id -u)" -eq 0 ]; then "$@"
+  else sudo "$@"
   fi
 }
 
-# Install a list of packages with the detected manager. Returns 0/1.
+# Quiet package install. Args: manager, packages...
 pkg_install() {
   PKG=$1
   shift
   case "$PKG" in
     apt-get)
-      run_root apt-get update
-      run_root apt-get install -y "$@"
+      run_root apt-get update -qq
+      run_root apt-get install -y -qq "$@"
       ;;
     dnf)
-      run_root dnf install -y "$@"
+      run_root dnf install -y -q "$@"
       ;;
     yum)
-      run_root yum install -y "$@"
+      run_root yum install -y -q "$@"
       ;;
     pacman)
-      run_root pacman -Sy --needed --noconfirm "$@"
+      run_root pacman -Sy --needed --noconfirm --quiet "$@"
       ;;
     zypper)
-      run_root zypper --non-interactive install "$@"
+      run_root zypper --non-interactive --quiet install "$@"
       ;;
     apk)
-      run_root apk add --no-cache "$@"
+      run_root apk add --no-cache --quiet "$@"
       ;;
-    *)
-      return 1
-      ;;
+    *) return 1 ;;
   esac
 }
 
-# ---------------------------------------------------------------------------
-# Dependencies
-# ---------------------------------------------------------------------------
-
 install_required_deps() {
-  missing_py=0
-  missing_git=0
-  need_cmd python3 || missing_py=1
-  need_cmd git || missing_git=1
-
-  if [ "$missing_py$missing_git" = "00" ]; then
-    say "Required deps OK (python3, git)."
-    return 0
-  fi
+  need_cmd python3 && need_cmd git && { say "Deps: ok"; return 0; }
 
   PKG=$(detect_pkg)
-  say "Package manager: $PKG"
-
   if [ "$PKG" = "none" ]; then
-    say "Could not detect apt-get/dnf/yum/pacman/zypper/apk."
-    say "Manually install: python3, git"
+    say "Please install python3 and git, then re-run."
     exit 1
   fi
-
   if ! need_cmd sudo && [ "$(id -u)" -ne 0 ]; then
-    say "Need sudo (or root) to install packages."
-    say "Manually install: python3, git"
+    say "Need sudo to install python3/git."
     exit 1
   fi
 
-  # Arch: package name is "python"
+  say "Installing python3 + git…"
   if [ "$PKG" = "pacman" ]; then
     pkgs="git"
-    [ "$missing_py" = 1 ] && pkgs="python $pkgs"
+    need_cmd python3 || pkgs="python git"
   else
     pkgs="git"
-    [ "$missing_py" = 1 ] && pkgs="python3 $pkgs"
+    need_cmd python3 || pkgs="python3 git"
   fi
-
   # shellcheck disable=SC2086
   pkg_install "$PKG" $pkgs
 
   if ! need_cmd python3 || ! need_cmd git; then
-    say "Still missing python3 or git after install."
-    say "Manually install: python3, git"
+    say "Still missing python3 or git."
     exit 1
   fi
+  say "Deps: ok"
 }
 
 want_bubblewrap() {
-  # INSTALL_BWRAP=0/1 overrides. Otherwise ask if stdin is a TTY; default no when piped.
   case "${INSTALL_BWRAP-}" in
     1|y|Y|yes|YES) return 0 ;;
     0|n|N|no|NO) return 1 ;;
   esac
-  if [ -t 0 ]; then
-    printf '%s' "Install bubblewrap for sandboxed freehand shell? [y/N] "
+
+  printf '%s' "Install bubblewrap (sandbox)? [Y/n] "
+  ans=
+  if [ -r /dev/tty ]; then
+    read -r ans < /dev/tty || ans=
+  elif [ -t 0 ]; then
     read -r ans || ans=
-    case "$ans" in
-      y|Y|yes|YES) return 0 ;;
-      *) return 1 ;;
-    esac
+  else
+    say "No prompt available — skipping bubblewrap."
+    return 1
   fi
-  say "Skipping bubblewrap (non-interactive). Shell will use Confirm."
-  say "Later (if your OS supports it): install package 'bubblewrap', or re-run with INSTALL_BWRAP=1"
-  return 1
+  # Default Y if Enter / empty
+  case "$ans" in
+    ""|y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 install_optional_bwrap() {
   if need_cmd bwrap; then
-    say "bubblewrap OK (sandboxed freehand shell)."
+    say "Sandbox: on"
     return 0
   fi
-
   if ! want_bubblewrap; then
-    say "No bubblewrap — agent still works; shell asks Confirm / Telegram YES-NO."
+    say "Sandbox: off (shell will ask Confirm)"
     return 0
   fi
 
   PKG=$(detect_pkg)
-  if [ "$PKG" = "none" ]; then
-    say "Cannot auto-install bubblewrap (no package manager)."
-    say "Agent will work without it."
+  if [ "$PKG" = "none" ] || { ! need_cmd sudo && [ "$(id -u)" -ne 0 ]; }; then
+    say "Sandbox: off (could not install)"
     return 0
   fi
 
-  if ! need_cmd sudo && [ "$(id -u)" -ne 0 ]; then
-    say "Need sudo to install bubblewrap — skipped."
-    return 0
-  fi
-
-  say "Trying bubblewrap (optional; older systems like Debian 11 may fail)…"
+  say "Installing bubblewrap…"
   set +e
-  pkg_install "$PKG" bubblewrap
-  rc=$?
+  pkg_install "$PKG" bubblewrap >/dev/null 2>&1
   set -e
 
   if need_cmd bwrap; then
-    say "bubblewrap installed."
+    say "Sandbox: on"
   else
-    say "bubblewrap not installed (exit $rc or unsupported glibc). Continuing without it."
-    say "Agent is fine — shell stays on Confirm until bwrap is available."
+    say "Sandbox: off (not supported on this OS — that's fine)"
   fi
 }
-
-# ---------------------------------------------------------------------------
-# Clone or update the project
-# ---------------------------------------------------------------------------
 
 fetch_repo() {
   if [ -d "$INSTALL_DIR/.git" ]; then
-    say "Updating existing install at $INSTALL_DIR …"
-    git -C "$INSTALL_DIR" pull --ff-only
+    say "Updating…"
+    git -C "$INSTALL_DIR" pull --ff-only --quiet
   elif [ -e "$INSTALL_DIR" ]; then
-    say "Folder $INSTALL_DIR exists but is not this git repo."
-    say "Move or remove it, then re-run."
+    say "Folder $INSTALL_DIR exists but isn't this repo. Move it and re-run."
     exit 1
   else
-    say "Cloning into $INSTALL_DIR …"
-    git clone "$REPO_URL" "$INSTALL_DIR"
+    say "Downloading…"
+    git clone --quiet "$REPO_URL" "$INSTALL_DIR"
   fi
 }
-
-# ---------------------------------------------------------------------------
-# Config (.env) and background service
-# ---------------------------------------------------------------------------
 
 setup_env_and_service() {
   cd "$INSTALL_DIR" || exit 1
-
   if [ ! -f .env ]; then
     cp .env.example .env
-    say "Created .env — add at least one API key (see README)."
-  else
-    say "Keeping existing .env"
+    say "Created .env — add an API key next."
   fi
-
   chmod +x run.sh enable-boot.sh install.sh 2>/dev/null || true
-
   if need_cmd systemctl; then
-    ./enable-boot.sh
+    ./enable-boot.sh >/dev/null
+    say "Service: started"
   else
-    say "No systemd — start manually with: ./run.sh"
+    say "Start with: ./run.sh"
   fi
 }
 
 # ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
-
-say "=== AI Agent install ==="
-show_host
+say "AI Agent setup"
 install_required_deps
 install_optional_bwrap
 fetch_repo
 setup_env_and_service
-
+ver=$(cat "$INSTALL_DIR/VERSION" 2>/dev/null || echo "?")
 say ""
-say "Almost done:"
-say "  1) Edit keys:  nano $INSTALL_DIR/.env"
-say "     Example: PROVIDER=xai   and   XAI_API_KEY=your_key"
-say "  2) Restart:    systemctl --user restart debian-ai-agent"
-say "  3) Open:       http://127.0.0.1:9191"
-say ""
-say "Done."
+say "Done (v$ver)."
+say "  nano $INSTALL_DIR/.env"
+say "  open http://127.0.0.1:9191"

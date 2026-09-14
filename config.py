@@ -22,11 +22,16 @@ ROOT = Path(__file__).resolve().parent
 
 
 def app_version():
-    """Read VERSION from disk so the UI and /api/health can show it."""
+    """Read VERSION (e.g. "0.1.26 (26)") for UI /api/health.
+
+    Format: semver + change counter in brackets; counter +1 every release.
+    """
     vp = ROOT / "VERSION"
-    if vp.exists():
+    try:
         return vp.read_text(encoding="utf-8").strip() or "0.0.0"
-    return "0.0.0"
+    except OSError:
+        return "0.0.0"
+
 
 
 # User secrets and overrides (API keys, HOST, PORT, WORKSPACE, PROVIDER).

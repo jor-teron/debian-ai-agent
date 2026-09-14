@@ -1,3 +1,5 @@
+Versioning: `0.1.26 (26)` — semver + change # that +1 every release (never resets).
+
 - One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 - Bubblewrap optional in install (`INSTALL_BWRAP=0/1` or prompt); install continues if bwrap unavailable
 # Features

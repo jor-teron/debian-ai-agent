@@ -1,6 +1,6 @@
 # AI Agent
 
-Version: see `VERSION`.
+Version: see `VERSION` (semver + change #, e.g. `0.1.26 (26)`).
 
 Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek / OpenRouter / DeepInfra).  
 Works on **most Linux distros**.
@@ -11,7 +11,7 @@ Install page: https://jor-teron.github.io/debian-ai-agent/
 
 - Python **3.8+** (`python3`)
 - `git`
-- `bubblewrap` (`bwrap`) — **optional**; installer asks (or `INSTALL_BWRAP=1`). Without it, shell uses Confirm. Older OS (e.g. Debian 11) can skip it.
+- `bubblewrap` (`bwrap`) — optional; setup asks **Install bubblewrap (sandbox)? [Y/n]** (pick **n** if unsupported). `INSTALL_BWRAP=0|1` skips the question.
 - At least one provider API key (see below)
 
 ## Install
