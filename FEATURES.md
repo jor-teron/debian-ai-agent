@@ -1,4 +1,4 @@
-Versioning: `0.1.30 (30)` — semver + change # that +1 every release (never resets).
+Versioning: `0.1.31 (31)` — semver + change # that +1 every release (never resets).
 
 - One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 - Bubblewrap optional in install (`INSTALL_BWRAP=0/1` or prompt); install continues if bwrap unavailable
@@ -15,6 +15,7 @@ Versioning: `0.1.30 (30)` — semver + change # that +1 every release (never res
 - **providers.py** — catalogs + `list_modes` / `list_providers` / `list_models` / `get_provider_meta` / `provider_ready`; `config.py` re-exports for compatibility
 - **Workspace folders** — jail = whole `~/ai-workspace` with `memory/`, `workspace/`, `test/`, `trash/`, `user/`; prefer `workspace/` for new work; **`user/` agent read-only**
 - **Light mode default** — dark available; theme toggle in header after version (`localStorage theme=light|dark`)
+- **Softer light theme** — no pure white; soft gray page/panels/bubbles (~25/75); bigger header controls (`#themeBtn`, Update, selects, LED); optional `.env` `UI_LIGHT_*` hex overrides (served via `/api/health` + `/api/models`, applied in light theme only)
 - **Update button** — after Model select → confirm → `POST /api/update` (`git pull --ff-only` + `systemctl --user restart`)
 - Memory — `memory/` tree (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topic/*.md`); optional session reset envs
 - Shell blocklist — destructive patterns blocked; **sudo allowed by default** (`ALLOW_SUDO=1`) but **always Confirm** (UI password / Telegram `YES password`)
@@ -27,7 +28,7 @@ Versioning: `0.1.30 (30)` — semver + change # that +1 every release (never res
 - Reminders + scheduled jobs
 - UI port **9191** (default localhost; `HOST=0.0.0.0` for LAN)
 - **Telegram** — YES/NO case-insensitive; sudo: `YES password`; best-effort deleteMessage after password; uses stored/default provider (unchanged)
-- `/api/models` — modes + providers + models + `status_blink_ms`; `/api/health` — keys, `providers_ready`, optional `selected` readiness for LED, `status_blink_ms`; `/api/update`
+- `/api/models` — modes + providers + models + `status_blink_ms` + `ui_light`; `/api/health` — keys, `providers_ready`, optional `selected` readiness for LED, `status_blink_ms`, `ui_light`; `/api/update`
 
 ## Later
 7. Command allow-list

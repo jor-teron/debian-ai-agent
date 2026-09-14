@@ -1,8 +1,8 @@
 """
 Config, env, paths, and constants (stdlib only).
 
-Single place for workspace location, listen address, system prompt, and
-.env helpers. Provider catalogs live in providers.py; this module
+Single place for workspace location, listen address, system prompt,
+.env helpers, and optional UI_LIGHT_* theme overrides. Provider catalogs live in providers.py; this module
 re-exports the names brain/server/tools already import so nothing breaks.
 
 Imports from: stdlib (os, re, pathlib, datetime); providers.py (catalog).
@@ -232,6 +232,52 @@ def load_env():
 def _env_get(name):
     """One env value: .env first, then the process environment, else empty."""
     return (load_env().get(name) or os.environ.get(name) or "").strip()
+
+
+# ---------------------------------------------------------------------------
+# Optional light-theme color overrides (UI_LIGHT_* in .env)
+# ---------------------------------------------------------------------------
+# Empty / unset → built-in soft-gray light defaults in ui.py.
+# Served to the browser via /api/health and /api/models as "ui_light".
+
+# Map: API/JSON key → env var name. CSS vars: --bg, --panel, …
+_UI_LIGHT_ENV = (
+    ("bg", "UI_LIGHT_BG"),
+    ("panel", "UI_LIGHT_PANEL"),
+    ("border", "UI_LIGHT_BORDER"),
+    ("text", "UI_LIGHT_TEXT"),
+    ("muted", "UI_LIGHT_MUTED"),
+    ("user", "UI_LIGHT_USER"),
+    ("bot", "UI_LIGHT_BOT"),
+    ("bot_border", "UI_LIGHT_BOT_BORDER"),
+    ("input", "UI_LIGHT_INPUT"),
+)
+
+# Loose hex: #rgb or #rrggbb (case-insensitive). Invalid values are ignored.
+_HEX_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
+
+
+def _valid_hex_color(raw):
+    """Return normalized hex string if valid #rgb/#rrggbb, else None."""
+    s = (raw or "").strip()
+    if not s or not _HEX_COLOR_RE.match(s):
+        return None
+    return s
+
+
+def ui_light_theme():
+    """Optional UI_LIGHT_* hex overrides from .env for the soft light theme.
+
+    Returns a dict of only valid keys (e.g. {"bg": "#d2d7e0"}). Empty dict
+    when nothing is set or all values are invalid. Dark theme is never
+    affected — the UI applies these only while data-theme=light.
+    """
+    out = {}
+    for key, env_name in _UI_LIGHT_ENV:
+        val = _valid_hex_color(_env_get(env_name))
+        if val:
+            out[key] = val
+    return out
 
 
 # ---------------------------------------------------------------------------

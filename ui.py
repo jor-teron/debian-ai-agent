@@ -1,5 +1,5 @@
 """
-Browser chat page (light default, dark available; sticky confirm; Enter=send).
+Browser chat page (soft light default, dark available; sticky confirm; Enter=send).
 
 This module holds the single HTML/CSS/JS page the user sees in the browser.
 The page talks to the JSON APIs on server.py (/api/chat, /api/health, …).
@@ -25,17 +25,17 @@ HTML = r"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="color-scheme" content="light dark"/>
-<meta name="theme-color" content="#f4f6fa"/>
+<meta name="theme-color" content="#d8dde5"/>
 <title>AI Agent</title>
 <style>
-/* ---- Light (default) ---- */
+/* ---- Light (default): soft gray ~25/75, no pure white ---- */
 :root, [data-theme="light"]{
   color-scheme:light;
-  --bg:#f4f6fa; --panel:#ffffff; --border:#d8dee9; --text:#1a2332;
-  --muted:#5b6b7c; --user:#e8eef8; --bot:#ffffff; --bot-border:#d8dee9;
-  --accent:#2563eb; --accent-fg:#ffffff; --ok:#059669; --bad:#dc2626;
-  --warn:#b45309; --confirm-bg:#fff7ed; --confirm-border:#fdba74;
-  --confirm-code-bg:#fffbeb; --confirm-code:#92400e; --input-bg:#ffffff;
+  --bg:#d8dde5; --panel:#e4e8ef; --border:#9aa3b2; --text:#1a2332;
+  --muted:#4a5568; --user:#b8c0cc; --bot:#c5cad3; --bot-border:#8b94a3;
+  --accent:#2563eb; --accent-fg:#0c1220; --ok:#059669; --bad:#dc2626;
+  --warn:#b45309; --confirm-bg:#efe6d4; --confirm-border:#c4a574;
+  --confirm-code-bg:#e8dcc0; --confirm-code:#92400e; --input-bg:#e4e8ef;
 }
 /* ---- Dark ---- */
 [data-theme="dark"]{
@@ -52,18 +52,20 @@ body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);dis
 header{flex:0 0 auto;padding:12px 16px;background:var(--panel);display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
 h1{font-size:1.05rem;margin:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 h1 .ver{font-size:.75rem;font-weight:500;color:var(--muted)}
-#themeBtn{padding:4px 8px;font-size:.85rem;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;cursor:pointer;line-height:1}
+/* Bigger header controls — easier to hit (theme, update, selects, LED) */
+#themeBtn{padding:6px 12px;font-size:1.15rem;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;cursor:pointer;line-height:1}
 #themeBtn:hover{color:var(--text)}
 .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .field{display:flex;gap:6px;align-items:center}
 label{font-size:.8rem;color:var(--muted);white-space:nowrap}
 select,button,textarea,input[type=file],input[type=password]{font:inherit;border-radius:8px;border:1px solid var(--border);background:var(--input-bg);color:var(--text)}
 select{padding:6px 8px}
-#btnUpdate{padding:6px 10px;font-size:.8rem;background:var(--panel);color:var(--text);border:1px solid var(--border);font-weight:600;cursor:pointer}
+.controls select{padding:8px 10px;font-size:.9rem}
+#btnUpdate{padding:8px 14px;font-size:.9rem;background:var(--panel);color:var(--text);border:1px solid var(--border);font-weight:600;cursor:pointer}
 #btnUpdate:hover{border-color:var(--accent)}
 /* ---- Status LED + short text ---- */
-#statusWrap{display:flex;align-items:center;gap:6px;margin-right:4px;max-width:280px}
-#led{width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:var(--muted);box-shadow:0 0 0 1px rgba(0,0,0,.12)}
+#statusWrap{display:flex;align-items:center;gap:8px;margin-right:4px;max-width:280px}
+#led{width:12px;height:12px;border-radius:50%;flex:0 0 auto;background:var(--muted);box-shadow:0 0 0 1px rgba(0,0,0,.12)}
 #led.ok{background:var(--ok);animation:none}
 #led.bad{background:var(--bad);animation:led-blink var(--blink,2000ms) step-end infinite}
 @keyframes led-blink{0%,100%{opacity:1}50%{opacity:.15}}
@@ -150,12 +152,39 @@ let history=[], keys={}, providersReady={};
 let pendingIsSudo=false;
 let selectedReady=null; // last /api/health selected readiness
 
+/* Optional UI_LIGHT_* overrides from .env (served via /api/models|/api/health). */
+let uiLight={};
+const UI_LIGHT_VARS={bg:'--bg',panel:'--panel',border:'--border',text:'--text',muted:'--muted',user:'--user',bot:'--bot',bot_border:'--bot-border',input:'--input-bg'};
+
+/** Loose hex check: #rgb or #rrggbb (case-insensitive). */
+function isHexColor(v){
+  return typeof v==='string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v.trim());
+}
+
+/** Apply or clear light-theme CSS variable overrides on :root (light only). */
+function applyUiLightOverrides(theme){
+  const root=document.documentElement;
+  Object.keys(UI_LIGHT_VARS).forEach(k=>{
+    const cssVar=UI_LIGHT_VARS[k];
+    if(theme==='light' && isHexColor(uiLight[k]||'')){
+      root.style.setProperty(cssVar, uiLight[k].trim());
+    } else {
+      // Drop inline override so stylesheet [data-theme="dark"] / defaults win
+      root.style.removeProperty(cssVar);
+    }
+  });
+}
+
 function applyTheme(t){
   const theme=(t==='dark')?'dark':'light';
   document.documentElement.setAttribute('data-theme', theme);
   localStorage.setItem('theme', theme);
+  applyUiLightOverrides(theme);
   const meta=document.querySelector('meta[name="theme-color"]');
-  if(meta) meta.content=(theme==='dark')?'#0f1419':'#f4f6fa';
+  if(meta){
+    const lightBg=(theme==='light' && isHexColor(uiLight.bg||''))?uiLight.bg.trim():'#d8dde5';
+    meta.content=(theme==='dark')?'#0f1419':lightBg;
+  }
   themeBtn.textContent=(theme==='dark')?'☀':'☾';
   themeBtn.title=(theme==='dark')?'Switch to light':'Switch to dark';
 }
@@ -167,6 +196,13 @@ themeBtn.onclick=()=>{
   const cur=document.documentElement.getAttribute('data-theme')||'light';
   applyTheme(cur==='dark'?'light':'dark');
 };
+
+/** Store ui_light map from API and re-apply if currently in light theme. */
+function setUiLight(obj){
+  uiLight=(obj && typeof obj==='object')?obj:{};
+  const cur=document.documentElement.getAttribute('data-theme')||'light';
+  if(cur==='light') applyUiLightOverrides('light');
+}
 
 /** Apply blink period from config (STATUS_BLINK_MS); green never blinks. */
 function applyBlinkMs(ms){
@@ -318,6 +354,7 @@ async function fetchHealth(){
   providersReady=h.providers_ready||providersReady;
   selectedReady=h.selected||null;
   if(h.status_blink_ms) applyBlinkMs(h.status_blink_ms);
+  if(h.ui_light) setUiLight(h.ui_light);
   if(h.version) window._ver=h.version;
   return h;
 }
@@ -332,6 +369,7 @@ async function boot(){
       default_mode:m.default_mode||'online',
       status_blink_ms:m.status_blink_ms||2000
     };
+    if(m.ui_light) setUiLight(m.ui_light);
     applyBlinkMs(catalog.status_blink_ms);
     fillModes();
     fillProviders();

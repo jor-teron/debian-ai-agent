@@ -2,7 +2,8 @@
 HTTP UI and API handler (stdlib http.server).
 
 Serves the chat page from ui.py and the JSON routes the browser calls
-(including online/offline provider catalog and status LED readiness).
+(including online/offline provider catalog, status LED readiness, and
+optional UI_LIGHT_* theme overrides).
 Does not talk to LLM APIs itself — that is brain.run_chat.
 
 Imports from: config.py (settings, keys), tools.py (upload/download/confirm),
@@ -29,6 +30,7 @@ from config import (
     provider_ready,
     readiness_status,
     status_blink_ms,
+    ui_light_theme,
 )
 from tools import (
     apply_update,
@@ -100,6 +102,7 @@ class Handler(BaseHTTPRequestHandler):
                     "providers_ready": ready_blob.get("providers_ready") or {},
                     "selected": selected,
                     "status_blink_ms": status_blink_ms(),
+                    "ui_light": ui_light_theme(),
                     "workspace": str(WORKSPACE),
                     "pending_shell": PENDING_SHELL.exists(),
                     "version": app_version(),
@@ -117,8 +120,11 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/models":
-            # Modes + providers + models for Mode / Provider / Model dropdowns
-            self._json(200, catalog_for_api())
+            # Modes + providers + models for Mode / Provider / Model dropdowns;
+            # ui_light carries optional UI_LIGHT_* .env hex overrides for light theme.
+            blob = catalog_for_api()
+            blob["ui_light"] = ui_light_theme()
+            self._json(200, blob)
             return
         if path == "/api/reminders":
             # Same list the model sees (due + upcoming)
