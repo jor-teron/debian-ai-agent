@@ -1,11 +1,11 @@
 """
-Provider catalogs and readiness helpers (online cloud + offline local).
+Provider catalogs and readiness helpers (online cloud + local runtimes).
 
 Owns the Provider/Model lists used by the UI and brain dispatch. Online
-providers need API keys; offline providers (Ollama, llama.cpp) talk to a
+providers need API keys; local providers (Ollama, llama.cpp) talk to a
 local OpenAI-compatible HTTP server and need no key.
 
-Mode: online | offline (UI may show Online / Offline).
+Mode: online | local (UI may show Online / Local).
 
 Imports from: config.py lazily inside helpers (load_env / paths) to avoid
               circular imports at module load.
@@ -22,8 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 # Modes
 # ---------------------------------------------------------------------------
 
-# Canonical mode ids (UI labels are capitalized Online / Offline).
-MODES: List[str] = ["online", "offline"]
+# Canonical mode ids (UI labels are capitalized Online / Local).
+MODES: List[str] = ["online", "local"]
 
 # Default mode when .env PROVIDER points at an online catalog entry.
 DEFAULT_MODE = "online"
@@ -39,7 +39,7 @@ GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 # Each online provider: display label, env var for the key, API "kind"
 # (gemini / openai / anthropic), models list (string ids), and a default.
 # kind "openai" means Chat Completions (OpenAI, xAI, DeepSeek, OpenRouter,
-# DeepInfra). Offline local servers also use kind "openai".
+# DeepInfra). Local runtimes also use kind "openai".
 ONLINE_PROVIDERS: Dict[str, Dict[str, Any]] = {
     "gemini": {
         "label": "Gemini",
@@ -131,7 +131,7 @@ ONLINE_PROVIDERS: Dict[str, Dict[str, Any]] = {
 
 
 # ---------------------------------------------------------------------------
-# Offline provider catalog (local OpenAI-compatible runtimes)
+# Local provider catalog (OpenAI-compatible runtimes)
 # ---------------------------------------------------------------------------
 
 # Curated Ollama tags (~10 under ~10B + one 70B). Tags match common `ollama pull`
@@ -177,10 +177,10 @@ _LLAMACPP_MODELS: List[Dict[str, str]] = [
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 DEFAULT_LLAMACPP_BASE_URL = "http://127.0.0.1:8080"
 
-OFFLINE_PROVIDERS: Dict[str, Dict[str, Any]] = {
+LOCAL_PROVIDERS: Dict[str, Dict[str, Any]] = {
     "ollama": {
         "label": "Ollama",
-        "mode": "offline",
+        "mode": "local",
         "needs_key": False,
         "env_key": "",  # no API key
         "kind": "openai",  # OpenAI-compatible /v1/chat/completions
@@ -194,7 +194,7 @@ OFFLINE_PROVIDERS: Dict[str, Dict[str, Any]] = {
     },
     "llamacpp": {
         "label": "llama.cpp",
-        "mode": "offline",
+        "mode": "local",
         "needs_key": False,
         "env_key": "",
         "kind": "openai",
@@ -219,12 +219,12 @@ OFFLINE_PROVIDERS: Dict[str, Dict[str, Any]] = {
 # Merged map used by brain/server/tools. Prefer list_providers(mode) in new code.
 PROVIDERS: Dict[str, Dict[str, Any]] = {}
 PROVIDERS.update(ONLINE_PROVIDERS)
-PROVIDERS.update(OFFLINE_PROVIDERS)
+PROVIDERS.update(LOCAL_PROVIDERS)
 
 # Fallback if PROVIDER in .env is missing or not in PROVIDERS.
 DEFAULT_PROVIDER = "gemini"
 
-# Model entry type: plain id string (online) or {id, label} (offline curated).
+# Model entry type: plain id string (online) or {id, label} (local curated).
 ModelEntry = Union[str, Dict[str, str]]
 
 
@@ -316,12 +316,12 @@ def list_modes() -> List[Dict[str, str]]:
     """Return [{id, label}, ...] for the Mode dropdown."""
     return [
         {"id": "online", "label": "Online"},
-        {"id": "offline", "label": "Offline"},
+        {"id": "local", "label": "Local"},
     ]
 
 
 def list_providers(mode: Optional[str] = None) -> List[str]:
-    """Provider ids, optionally filtered by mode (online|offline)."""
+    """Provider ids, optionally filtered by mode (online|local)."""
     mode_l = (mode or "").strip().lower()
     out: List[str] = []
     for pid, meta in PROVIDERS.items():
@@ -341,12 +341,12 @@ def provider_openai_base(provider: str) -> str:
     """Resolved OpenAI-compat base URL including /v1 for chat/completions.
 
     Online: meta['base'] as stored (already .../v1).
-    Offline: {OLLAMA|LLAMACPP}_BASE_URL + openai_path (default /v1).
+    Local: {OLLAMA|LLAMACPP}_BASE_URL + openai_path (default /v1).
     """
     meta = PROVIDERS.get(provider) or {}
     if meta.get("base"):
         return str(meta["base"]).rstrip("/")
-    # Offline: resolve from env
+    # Local: resolve from env
     if provider == "ollama":
         root = ollama_base_url().rstrip("/")
     elif provider == "llamacpp":
@@ -371,7 +371,7 @@ def provider_openai_base(provider: str) -> str:
 def get_provider_meta(provider: str) -> Dict[str, Any]:
     """Provider meta for UI/brain: label, needs_key, base, default, mode, kind.
 
-    Resolves offline base URLs from .env. Returns a shallow copy so callers
+    Resolves local base URLs from .env. Returns a shallow copy so callers
     can mutate without touching the catalog.
     """
     raw = PROVIDERS.get(provider)
@@ -382,7 +382,7 @@ def get_provider_meta(provider: str) -> Dict[str, Any]:
     meta["mode"] = meta.get("mode") or "online"
     meta["needs_key"] = bool(meta.get("needs_key", True))
     meta["label"] = meta.get("label") or provider
-    # Resolved OpenAI-compat base (online already has base; offline computed).
+    # Resolved OpenAI-compat base (online already has base; local computed).
     if meta.get("kind") == "openai":
         meta["base"] = provider_openai_base(provider)
     elif meta.get("base_env") and not meta.get("base"):
@@ -400,7 +400,7 @@ def get_provider_meta(provider: str) -> Dict[str, Any]:
 
 
 def provider_key(provider: str) -> str:
-    """API key for a provider id, or empty if unset / offline (no key)."""
+    """API key for a provider id, or empty if unset / local (no key)."""
     meta = PROVIDERS.get(provider) or {}
     if not meta.get("needs_key", True):
         return ""
@@ -411,7 +411,7 @@ def provider_key(provider: str) -> str:
 def keys_status() -> Dict[str, bool]:
     """Map of provider id → True if that key is set (online providers only).
 
-    Offline providers are False here (they do not use keys); use
+    Local providers are False here (they do not use keys); use
     provider_ready() / readiness_status() for LED state.
     """
     out: Dict[str, bool] = {}
@@ -430,7 +430,7 @@ def default_provider() -> str:
 
 
 def default_mode() -> str:
-    """Mode for the default provider (online|offline)."""
+    """Mode for the default provider (online|local)."""
     meta = PROVIDERS.get(default_provider()) or {}
     return meta.get("mode") or DEFAULT_MODE
 
@@ -440,7 +440,7 @@ def default_model(provider: Optional[str] = None) -> str:
     provider = provider or default_provider()
     meta = PROVIDERS.get(provider) or PROVIDERS[DEFAULT_PROVIDER]
     # Optional per-provider model env: GEMINI_MODEL, OPENAI_MODEL, etc.
-    # Offline providers have empty env_key — skip the replace path.
+    # Local providers have empty env_key — skip the replace path.
     ek = meta.get("env_key") or ""
     m = ""
     if ek and ek.endswith("_API_KEY"):
@@ -491,7 +491,7 @@ def _http_get_json(url: str, timeout: float = 1.5) -> Tuple[bool, Any]:
         return False, None
 
 
-def offline_runtime_reachable(provider: str) -> bool:
+def local_runtime_reachable(provider: str) -> bool:
     """True if the local daemon answers a cheap probe (Ollama tags / models)."""
     if provider == "ollama":
         root = ollama_base_url().rstrip("/")
@@ -509,7 +509,7 @@ def offline_runtime_reachable(provider: str) -> bool:
     return False
 
 
-def offline_installed_models(provider: str) -> Optional[List[str]]:
+def local_installed_models(provider: str) -> Optional[List[str]]:
     """Installed/loaded model ids when detectable; None if unknown.
 
     Ollama: names from /api/tags.
@@ -544,6 +544,12 @@ def offline_installed_models(provider: str) -> Optional[List[str]]:
     return None
 
 
+# Thin aliases (mode id renamed offline → local in 0.2.0).
+offline_runtime_reachable = local_runtime_reachable
+offline_installed_models = local_installed_models
+OFFLINE_PROVIDERS = LOCAL_PROVIDERS  # noqa: N816 — legacy name
+
+
 def model_looks_installed(installed: List[str], model: str) -> bool:
     """True if model matches an installed tag (exact or prefix before ':').
 
@@ -571,7 +577,7 @@ def provider_ready(
     """Readiness dict for the status LED / health API.
 
     Online: ready if API key present.
-    Offline: ready if runtime reachable; if model given and install list is
+    Local: ready if runtime reachable; if model given and install list is
     detectable, also require the model to appear installed.
 
     Returns keys: ready (bool), mode, reason (short), has_key, reachable,
@@ -601,8 +607,8 @@ def provider_ready(
             "model_installed": None,
             "label": label,
         }
-    # Offline path
-    reachable = offline_runtime_reachable(provider)
+    # Local path
+    reachable = local_runtime_reachable(provider)
     model_installed: Optional[bool] = None
     reason = "ok"
     ready = reachable
@@ -610,7 +616,7 @@ def provider_ready(
         reason = "runtime unreachable"
         ready = False
     else:
-        installed = offline_installed_models(provider)
+        installed = local_installed_models(provider)
         if model and installed is not None:
             model_installed = model_looks_installed(installed, model)
             if not model_installed:
@@ -637,7 +643,7 @@ def readiness_status(selected_provider: Optional[str] = None, selected_model: Op
     """Compact readiness map for /api/health (all providers + optional selected)."""
     all_ready: Dict[str, bool] = {}
     for pid in PROVIDERS:
-        # Cheap: online = key check only; offline = reachability (no model).
+        # Cheap: online = key check only; local = reachability (no model).
         st = provider_ready(pid, model=None)
         all_ready[pid] = bool(st.get("ready"))
     selected = None

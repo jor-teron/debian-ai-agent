@@ -1,6 +1,6 @@
 #!/bin/sh
 # =============================================================================
-# AI Agent — quiet one-shot installer
+# linux-ai-agent — one-shot installer (decorative + quiet packages)
 # =============================================================================
 # Required: python3, git. Optional: bubblewrap (always asks [y/N] on /dev/tty).
 # INSTALL_BWRAP=0|1 skips the question.
@@ -9,10 +9,30 @@
 
 set -e
 
-REPO_URL="https://github.com/jor-teron/debian-ai-agent.git"
-INSTALL_DIR="${HOME}/debian-ai-agent"
+REPO_URL="https://github.com/jor-teron/linux-ai-agent.git"
+INSTALL_DIR="${HOME}/linux-ai-agent"
+OLD_DIR="${HOME}/debian-ai-agent"
+
+# ---------------------------------------------------------------------------
+# Decorative helpers (no cowsay/figlet)
+# ---------------------------------------------------------------------------
 
 say() { printf '%s\n' "$*"; }
+
+say_box() {
+  # $1 = title (short), $2 = body line
+  title=$1
+  body=$2
+  say "┌─ ${title} ─────────────────────────┐"
+  say "│  ${body}"
+  say "└──────────────────────────────────────────┘"
+}
+
+say_ok() { say "  ✓  $*"; }
+say_skip() { say "  ·  $*"; }
+say_fail() { say "  ✗  ;(  $*"; }
+
+pause() { sleep 2; }
 
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 
@@ -58,20 +78,34 @@ pkg_install() {
   esac
 }
 
+migrate_hint() {
+  if [ -d "$OLD_DIR" ] && [ ! -e "$INSTALL_DIR" ]; then
+    say ""
+    say "  ·‿·  Found old install at $OLD_DIR"
+    say "       New home is $INSTALL_DIR — see README migrate notes."
+    say "       (We won't move or delete your data.)"
+    say ""
+  fi
+}
+
 install_required_deps() {
-  need_cmd python3 && need_cmd git && { say "Deps: ok"; return 0; }
+  say "[1/6] Tools — checking python3 + git… (looking around)"
+  if need_cmd python3 && need_cmd git; then
+    say_ok "·ᴗ·  Found them. Nice."
+    return 0
+  fi
 
   PKG=$(detect_pkg)
   if [ "$PKG" = "none" ]; then
-    say "Please install python3 and git, then re-run."
+    say_fail "Please install python3 and git, then re-run."
     exit 1
   fi
   if ! need_cmd sudo && [ "$(id -u)" -ne 0 ]; then
-    say "Need sudo to install python3/git."
+    say_fail "Need sudo to install python3/git."
     exit 1
   fi
 
-  say "Installing python3 + git…"
+  say "  … installing python3 + git"
   if [ "$PKG" = "pacman" ]; then
     pkgs="git"
     need_cmd python3 || pkgs="python git"
@@ -83,10 +117,10 @@ install_required_deps() {
   pkg_install "$PKG" $pkgs
 
   if ! need_cmd python3 || ! need_cmd git; then
-    say "Still missing python3 or git."
+    say_fail "Still missing python3 or git."
     exit 1
   fi
-  say "Deps: ok"
+  say_ok "·ᴗ·  Found them. Nice."
 }
 
 want_bubblewrap() {
@@ -95,14 +129,14 @@ want_bubblewrap() {
     0|n|N|no|NO) return 1 ;;
   esac
 
-  printf '%s' "Install bubblewrap (sandbox)? [Y/n] "
+  printf '%s' "  Install bubblewrap (sandbox)? [Y/n] "
   ans=
   if [ -r /dev/tty ]; then
     read -r ans < /dev/tty || ans=
   elif [ -t 0 ]; then
     read -r ans || ans=
   else
-    say "No prompt available — skipping bubblewrap."
+    say_skip "No prompt available — skipping bubblewrap."
     return 1
   fi
   # Default Y if Enter / empty
@@ -113,78 +147,98 @@ want_bubblewrap() {
 }
 
 install_optional_bwrap() {
+  say "[2/6] Bubblewrap — optional sandbox"
   if need_cmd bwrap; then
-    say "Sandbox: on"
+    say_ok "·ᴗ·  Sandbox ready."
     return 0
   fi
   if ! want_bubblewrap; then
-    say "Sandbox: off (shell will ask Confirm)"
+    say_skip "Skipped (shell will ask Confirm)."
     return 0
   fi
 
   PKG=$(detect_pkg)
   if [ "$PKG" = "none" ] || { ! need_cmd sudo && [ "$(id -u)" -ne 0 ]; }; then
-    say "Sandbox: off (could not install)"
+    say_skip "Could not install — that's fine."
     return 0
   fi
 
-  say "Installing bubblewrap…"
+  say "  … installing bubblewrap"
   set +e
   pkg_install "$PKG" bubblewrap >/dev/null 2>&1
   set -e
 
   if need_cmd bwrap; then
-    say "Sandbox: on"
+    say_ok "·ᴗ·  Sandbox ready."
   else
-    say "Sandbox: off (not supported on this OS — that's fine)"
+    say_skip "Not supported on this OS — that's fine."
   fi
 }
 
 fetch_repo() {
+  say "[3/6] Clone — ~/linux-ai-agent"
   if [ -d "$INSTALL_DIR/.git" ]; then
-    say "Updating…"
+    say "  … updating existing install"
     git -C "$INSTALL_DIR" pull --ff-only --quiet
+    say_ok "★  Code is home."
   elif [ -e "$INSTALL_DIR" ]; then
-    say "Folder $INSTALL_DIR exists but isn't this repo. Move it and re-run."
+    say_fail "Folder $INSTALL_DIR exists but isn't this repo. Move it and re-run."
     exit 1
   else
-    say "Downloading…"
+    migrate_hint
+    say "  … downloading"
     git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+    say_ok "★  Code is home."
   fi
 }
 
 ensure_workspace_dirs() {
   # Default AI workspace (~/ai-workspace) + standard subdirs.
-  # Expand ~ via $HOME. Safe to re-run (mkdir -p).
   WS="${HOME}/ai-workspace"
   mkdir -p "$WS/memory" "$WS/workspace" "$WS/test" "$WS/trash" "$WS/user"
-  say "Workspace: $WS"
 }
 
 setup_env_and_service() {
+  say "[4/6] Workspace folders"
   cd "$INSTALL_DIR" || exit 1
   if [ ! -f .env ]; then
     cp .env.example .env
-    say "Created .env — add an API key next."
+    say "  … created .env — add an API key next."
   fi
   chmod +x run.sh enable-boot.sh install.sh 2>/dev/null || true
   ensure_workspace_dirs
+  say_ok "·ᴗ·  Folders ready."
+  pause
+
+  say "[5/6] Service — start at login"
   if need_cmd systemctl; then
     ./enable-boot.sh >/dev/null
-    say "Service: started"
+    say_ok "·‿·  It'll wake up with you."
   else
-    say "Start with: ./run.sh"
+    say_skip "No systemctl — start with: ./run.sh"
   fi
 }
 
 # ---------------------------------------------------------------------------
-say "AI Agent setup"
-install_required_deps
-install_optional_bwrap
-fetch_repo
-setup_env_and_service
-ver=$(cat "$INSTALL_DIR/VERSION" 2>/dev/null || echo "?")
+say_box "linux-ai-agent" "·‿·  Hey. Let's set up your AI agent."
 say ""
-say "Done (v$ver)."
+
+install_required_deps
+pause
+
+install_optional_bwrap
+pause
+
+fetch_repo
+pause
+
+setup_env_and_service
+pause
+
+ver=$(cat "$INSTALL_DIR/VERSION" 2>/dev/null || echo "?")
+say "[6/6] Done — nano .env, restart, open http://127.0.0.1:9191"
+say "  ·‿·  Go say hi to your agent.  (v$ver)"
+say ""
 say "  nano $INSTALL_DIR/.env"
+say "  systemctl --user restart linux-ai-agent"
 say "  open http://127.0.0.1:9191"

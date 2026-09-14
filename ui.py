@@ -4,7 +4,7 @@ Browser chat page (soft light default, dark available; sticky confirm; Enter=sen
 This module holds the single HTML/CSS/JS page the user sees in the browser.
 The page talks to the JSON APIs on server.py (/api/chat, /api/health, …).
 
-Header: Mode (Online|Offline) → Provider → Model; status LED (green solid /
+Header: Mode (Online|Local) → Provider → Model; status LED (green solid /
 red blink) beside a short status string. Composer row aligns textarea, file
 upload, and Send to the same height.
 
@@ -225,14 +225,16 @@ function providersForMode(){
 function fillModes(){
   modeSel.innerHTML='';
   const modes=(catalog.modes&&catalog.modes.length)?catalog.modes:[
-    {id:'online',label:'Online'},{id:'offline',label:'Offline'}
+    {id:'online',label:'Online'},{id:'local',label:'Local'}
   ];
   modes.forEach(mo=>{
     const o=document.createElement('option');
     o.value=mo.id; o.textContent=mo.label||mo.id;
     modeSel.appendChild(o);
   });
-  const sm=localStorage.getItem('mode');
+  let sm=localStorage.getItem('mode');
+  // One-time migrate: mode id offline → local (0.2.0)
+  if(sm==='offline'){ sm='local'; localStorage.setItem('mode','local'); }
   if(sm && [...modeSel.options].some(o=>o.value===sm)) modeSel.value=sm;
   else if(catalog.default_mode) modeSel.value=catalog.default_mode;
   else modeSel.value='online';
@@ -293,7 +295,7 @@ function updateStatus(){
     else {
       const reason=selectedReady.reason||'not ready';
       if(reason==='missing API key') text='No key · '+label;
-      else if(reason==='runtime unreachable') text='Offline · '+label;
+      else if(reason==='runtime unreachable') text='No runtime · '+label;
       else if(reason==='model not installed') text='No model · '+label;
       else text='Err · '+label;
     }
@@ -301,9 +303,9 @@ function updateStatus(){
     ok=!!keys[pid];
     text=ok?('OK · '+label):('No key · '+label);
   } else {
-    // Offline without selected blob yet — use providers_ready map if present
+    // Local without selected blob yet — use providers_ready map if present
     ok=!!(providersReady&&providersReady[pid]);
-    text=ok?('OK · '+label):('Offline · '+label);
+    text=ok?('OK · '+label):('No runtime · '+label);
   }
   status.textContent=text;
   status.className=ok?'ok':'bad';

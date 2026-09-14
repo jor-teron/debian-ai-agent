@@ -161,7 +161,7 @@ from providers import (  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Status LED / offline runtime env (also documented in .env.example)
+# Status LED / local runtime env (also documented in .env.example)
 # ---------------------------------------------------------------------------
 
 

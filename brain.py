@@ -218,7 +218,7 @@ def gemini_chat(message, model, history):
 # OpenAI-compatible Chat Completions (OpenAI, xAI, DeepSeek, Ollama, llama.cpp)
 # ---------------------------------------------------------------------------
 
-# Curated tiny offline models that reject OpenAI tool schemas (Ollama 400:
+# Curated tiny local models that reject OpenAI tool schemas (Ollama 400:
 # "does not support tools"). Match flexibly: ignore registry path and :tag.
 _NO_TOOLS_MODEL_FRAGMENTS = ("tinydolphin", "tinyllama")
 
@@ -246,7 +246,7 @@ def _http_err_no_tools(err_text):
 def openai_compat_chat(provider, message, model, history):
     """Chat with an OpenAI-style API, running workspace tools as tool_calls.
 
-    Used for cloud OpenAI-compat providers and offline Ollama / llama.cpp
+    Used for cloud OpenAI-compat providers and local Ollama / llama.cpp
     (local base URL from providers.provider_openai_base; no API key required).
 
     Small local models (tinydolphin, tinyllama, …) often reject tool schemas.
@@ -278,18 +278,18 @@ def openai_compat_chat(provider, message, model, history):
     url = base.rstrip("/") + "/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        # Offline: dummy bearer; online: real key from .env.
+        # Local: dummy bearer; online: real key from .env.
         "Authorization": "Bearer %s" % (key or "local"),
     }
     # OpenRouter asks for these optional attribution headers on free/paid routes.
     if provider == "openrouter":
-        headers["HTTP-Referer"] = "https://github.com/jor-teron/debian-ai-agent"
+        headers["HTTP-Referer"] = "https://github.com/jor-teron/linux-ai-agent"
         headers["X-Title"] = "AI-Agent"
     tool_trace = []
     reply = ""
 
-    # Skip tools for known tiny offline models (avoid a wasted 400). Larger
-    # offline models (llama3.2, mistral, …) still try with tools first.
+    # Skip tools for known tiny local models (avoid a wasted 400). Larger
+    # local models (llama3.2, mistral, …) still try with tools first.
     use_tools = not _model_lacks_tool_support(model, meta)
     no_tools_retry_done = False
     # Without tools: single completion only (no tool loop).
@@ -487,7 +487,7 @@ def anthropic_chat(message, model, history):
 
 
 def run_chat(message, provider=None, model=None, history=None):
-    """Pick the right chat function from PROVIDERS[id].kind (online + offline)."""
+    """Pick the right chat function from PROVIDERS[id].kind (online + local)."""
     provider = (provider or default_provider() or DEFAULT_PROVIDER).lower().strip()
     if provider not in PROVIDERS:
         return {

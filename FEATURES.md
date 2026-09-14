@@ -1,17 +1,18 @@
-Versioning: `0.1.31 (31)` — semver + change # that +1 every release (never resets).
+Versioning: `0.2.0 (32)` — semver + change # that +1 every release (never resets).
 
 - One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 - Bubblewrap optional in install (`INSTALL_BWRAP=0/1` or prompt); install continues if bwrap unavailable
+- Product/repo rename: **linux-ai-agent** (was debian-ai-agent); install dir `~/linux-ai-agent`; unit `linux-ai-agent.service`
 
 # Features
 
 ## Now
 - **Modular layout** — `config.py` / `providers.py` / `tools.py` / `brain.py` / `ui.py` / `server.py` / `telegram.py` / `run.py` (stdlib only)
-- **Online / Offline modes** — Mode dropdown before Provider; Provider list filters by mode; Model list by provider; mode persisted in `localStorage`
+- **Online / Local modes** — Mode dropdown before Provider; Provider list filters by mode; Model list by provider; mode persisted in `localStorage` (migrates saved `offline` → `local` once)
 - **Multi-provider chat (online)** — gemini, openai, xai, anthropic, deepseek, openrouter, deepinfra
-- **Offline providers** — Ollama (`OLLAMA_BASE_URL`, default `http://127.0.0.1:11434`) and llama.cpp (`LLAMACPP_BASE_URL`, default `http://127.0.0.1:8080`); OpenAI-compatible; no API key; curated small models + Llama 3.1 70B (RAM warning). Local install stays out of `install.sh`
-- **Offline tool fallback** — Ollama/local auto-skip or retry without tools when the model lacks tool support (tiny models like tinydolphin/tinyllama)
-- **Status LED** — round LED beside short status (`OK · Gemini` / `No key · …` / `Offline · …`); green solid when ready; red blink when not; blink period `STATUS_BLINK_MS` (default 2000, `.env` only)
+- **Local providers** — Ollama (`OLLAMA_BASE_URL`, default `http://127.0.0.1:11434`) and llama.cpp (`LLAMACPP_BASE_URL`, default `http://127.0.0.1:8080`); OpenAI-compatible; no API key; curated small models + Llama 3.1 70B (RAM warning). Local install stays out of `install.sh`
+- **Local tool fallback** — Ollama/local auto-skip or retry without tools when the model lacks tool support (tiny models like tinydolphin/tinyllama)
+- **Status LED** — round LED beside short status (`OK · Gemini` / `No key · …` / `No runtime · …`); green solid when ready; red blink when not; blink period `STATUS_BLINK_MS` (default 2000, `.env` only)
 - **providers.py** — catalogs + `list_modes` / `list_providers` / `list_models` / `get_provider_meta` / `provider_ready`; `config.py` re-exports for compatibility
 - **Workspace folders** — jail = whole `~/ai-workspace` with `memory/`, `workspace/`, `test/`, `trash/`, `user/`; prefer `workspace/` for new work; **`user/` agent read-only**
 - **Light mode default** — dark available; theme toggle in header after version (`localStorage theme=light|dark`)

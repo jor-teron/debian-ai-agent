@@ -52,7 +52,7 @@ def main():
     else:
         print("Telegram: off (no token)")
     server = ThreadingHTTPServer((HOST, PORT), Handler)
-    print("debian-ai-agent v%s" % app_version())
+    print("linux-ai-agent v%s" % app_version())
     print("Workspace: %s" % WORKSPACE)
     print("Default provider: %s" % default_provider())
     if HOST in ("0.0.0.0", "::"):

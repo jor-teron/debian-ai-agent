@@ -4,6 +4,8 @@
 
 cd "$(dirname "$0")" || exit 1
 
+echo "·‿·  Starting linux-ai-agent…"
+
 try_cmd() {
   # $1 = command, remaining args optional (e.g. py -3)
   cmd=$1

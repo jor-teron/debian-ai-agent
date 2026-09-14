@@ -2,7 +2,7 @@
 HTTP UI and API handler (stdlib http.server).
 
 Serves the chat page from ui.py and the JSON routes the browser calls
-(including online/offline provider catalog, status LED readiness, and
+(including online/local provider catalog, status LED readiness, and
 optional UI_LIGHT_* theme overrides).
 Does not talk to LLM APIs itself — that is brain.run_chat.
 

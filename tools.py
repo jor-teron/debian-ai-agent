@@ -711,7 +711,7 @@ def apply_update():
             [
                 "bash",
                 "-lc",
-                "sleep 1; systemctl --user restart debian-ai-agent",
+                "sleep 1; systemctl --user restart linux-ai-agent",
             ],
             start_new_session=True,
             stdout=subprocess.DEVNULL,
