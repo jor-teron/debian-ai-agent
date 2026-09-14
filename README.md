@@ -11,7 +11,7 @@ Install page: https://jor-teron.github.io/debian-ai-agent/
 
 - Python **3.8+** (`python3`)
 - `git`
-- `bubblewrap` (`bwrap`) — optional but recommended; enables sandboxed shell freehand
+- `bubblewrap` (`bwrap`) — **optional**; installer asks (or `INSTALL_BWRAP=1`). Without it, shell uses Confirm. Older OS (e.g. Debian 11) can skip it.
 - At least one provider API key (see below)
 
 ## Install
@@ -23,7 +23,8 @@ curl -fsSL https://raw.githubusercontent.com/jor-teron/debian-ai-agent/main/inst
 ```
 
 The installer detects `apt-get`, `dnf`, `yum`, `pacman`, `zypper`, or `apk`.  
-If none are found: **Manually install: python3, git, bubblewrap**
+Required: **python3**, **git**. Bubblewrap is optional (ask / `INSTALL_BWRAP=1`; skip on old glibc).  
+If no package manager: **Manually install: python3, git**
 
 Then edit keys and open the page:
 
