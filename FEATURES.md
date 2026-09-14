@@ -1,4 +1,4 @@
-Versioning: `0.1.29 (29)` — semver + change # that +1 every release (never resets).
+Versioning: `0.1.30 (30)` — semver + change # that +1 every release (never resets).
 
 - One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 - Bubblewrap optional in install (`INSTALL_BWRAP=0/1` or prompt); install continues if bwrap unavailable
@@ -10,6 +10,7 @@ Versioning: `0.1.29 (29)` — semver + change # that +1 every release (never res
 - **Online / Offline modes** — Mode dropdown before Provider; Provider list filters by mode; Model list by provider; mode persisted in `localStorage`
 - **Multi-provider chat (online)** — gemini, openai, xai, anthropic, deepseek, openrouter, deepinfra
 - **Offline providers** — Ollama (`OLLAMA_BASE_URL`, default `http://127.0.0.1:11434`) and llama.cpp (`LLAMACPP_BASE_URL`, default `http://127.0.0.1:8080`); OpenAI-compatible; no API key; curated small models + Llama 3.1 70B (RAM warning). Local install stays out of `install.sh`
+- **Offline tool fallback** — Ollama/local auto-skip or retry without tools when the model lacks tool support (tiny models like tinydolphin/tinyllama)
 - **Status LED** — round LED beside short status (`OK · Gemini` / `No key · …` / `Offline · …`); green solid when ready; red blink when not; blink period `STATUS_BLINK_MS` (default 2000, `.env` only)
 - **providers.py** — catalogs + `list_modes` / `list_providers` / `list_models` / `get_provider_meta` / `provider_ready`; `config.py` re-exports for compatibility
 - **Workspace folders** — jail = whole `~/ai-workspace` with `memory/`, `workspace/`, `test/`, `trash/`, `user/`; prefer `workspace/` for new work; **`user/` agent read-only**
@@ -31,3 +32,4 @@ Versioning: `0.1.29 (29)` — semver + change # that +1 every release (never res
 ## Later
 7. Command allow-list
 8. Optional UI install/pull helpers for Ollama models
+9. **No Docker** — not pursuing; keep Bubblewrap. Docker is a different model (images/containers), bigger install/RAM, extra command latency, and fights host OS hooks (workspace, systemd user service, Telegram, Update). Optional community Dockerfile only if someone asks — never default install.

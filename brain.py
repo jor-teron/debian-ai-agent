@@ -215,8 +215,32 @@ def gemini_chat(message, model, history):
 
 
 # ---------------------------------------------------------------------------
-# OpenAI-compatible Chat Completions (OpenAI, xAI, DeepSeek)
+# OpenAI-compatible Chat Completions (OpenAI, xAI, DeepSeek, Ollama, llama.cpp)
 # ---------------------------------------------------------------------------
+
+# Curated tiny offline models that reject OpenAI tool schemas (Ollama 400:
+# "does not support tools"). Match flexibly: ignore registry path and :tag.
+_NO_TOOLS_MODEL_FRAGMENTS = ("tinydolphin", "tinyllama")
+
+
+def _model_lacks_tool_support(model, meta=None):
+    """True when we should skip tools up front (known tiny / supports_tools=False)."""
+    meta = meta or {}
+    if meta.get("supports_tools") is False:
+        return True
+    mid = (model or "").lower()
+    # e.g. registry.ollama.ai/library/tinydolphin:latest → tinydolphin
+    leaf = mid.rsplit("/", 1)[-1]
+    name = leaf.split(":", 1)[0]
+    for frag in _NO_TOOLS_MODEL_FRAGMENTS:
+        if frag in mid or frag == name:
+            return True
+    return False
+
+
+def _http_err_no_tools(err_text):
+    """True if the server rejected the request because the model has no tools."""
+    return "does not support tools" in (err_text or "").lower()
 
 
 def openai_compat_chat(provider, message, model, history):
@@ -224,6 +248,11 @@ def openai_compat_chat(provider, message, model, history):
 
     Used for cloud OpenAI-compat providers and offline Ollama / llama.cpp
     (local base URL from providers.provider_openai_base; no API key required).
+
+    Small local models (tinydolphin, tinyllama, …) often reject tool schemas.
+    We skip tools for known no-tool names / supports_tools=False, and if any
+    model returns "does not support tools", retry once without tools/tool_choice
+    (plain messages + system prompt, empty tools trace, no tool loop).
     """
     meta = get_provider_meta(provider) or PROVIDERS[provider]
     needs_key = bool(meta.get("needs_key", True))
@@ -259,17 +288,32 @@ def openai_compat_chat(provider, message, model, history):
     tool_trace = []
     reply = ""
 
-    for _ in range(6):
+    # Skip tools for known tiny offline models (avoid a wasted 400). Larger
+    # offline models (llama3.2, mistral, …) still try with tools first.
+    use_tools = not _model_lacks_tool_support(model, meta)
+    no_tools_retry_done = False
+    # Without tools: single completion only (no tool loop).
+    rounds = 1 if not use_tools else 6
+    i = 0
+    while i < rounds:
+        i += 1
         body = {
             "model": model,
             "messages": messages,
-            "tools": openai_tools(),
-            "tool_choice": "auto",
         }
+        if use_tools:
+            body["tools"] = openai_tools()
+            body["tool_choice"] = "auto"
         try:
             data = _http_json(url, body, headers, timeout=90)
         except urllib.error.HTTPError as e:
             err = e.read().decode("utf-8", errors="replace")[:800]
+            # Auto-fallback: model rejected tools → one plain retry (no tools).
+            if use_tools and not no_tools_retry_done and _http_err_no_tools(err):
+                use_tools = False
+                no_tools_retry_done = True
+                rounds = i + 1  # allow exactly one more attempt without tools
+                continue
             return {
                 "ok": False,
                 "error": "%s HTTP %s: %s" % (provider, e.code, err),
@@ -293,7 +337,7 @@ def openai_compat_chat(provider, message, model, history):
         tool_calls = msg.get("tool_calls") or []
         content = msg.get("content") or ""
 
-        if not tool_calls:
+        if not use_tools or not tool_calls:
             reply = (content or "").strip() or "(No text)"
             break
 
