@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="color-scheme" content="light dark"/>
+<meta name="theme-color" content="#d8dde5"/>
+<title>AI Agent</title>
+<link rel="stylesheet" href="/ui/style.css"/>
+</head><body>
+<header>
+  <h1>AI Agent <span class="ver" id="ver">…</span>
+    <button type="button" id="themeBtn" title="Toggle light/dark theme" aria-label="Toggle theme">◐</button>
+  </h1>
+  <div class="controls">
+    <div id="statusWrap" title="Provider readiness">
+      <span id="led" aria-hidden="true"></span>
+      <div id="status">…</div>
+    </div>
+    <div class="field"><label for="mode">Mode</label>
+      <select id="mode"></select>
+    </div>
+    <div class="field"><label for="provider">Provider</label>
+      <select id="provider"></select>
+    </div>
+    <div class="field"><label for="model">Model</label>
+      <select id="model"></select>
+    </div>
+    <div class="field" title="Send tool schemas this turn (also auto on keywords)">
+      <label for="toolsToggle">Tools</label>
+      <input type="checkbox" id="toolsToggle"/>
+    </div>
+    <button type="button" id="btnUpdate" title="git pull and restart service">Update</button>
+  </div>
+</header>
+<div id="note"></div>
+<div id="log"></div>
+<div id="dock">
+  <div id="confirm">
+    <span class="label">Run shell?</span>
+    <code id="pendingCmd"></code>
+    <span id="sudoPassWrap"><label for="sudoPass">sudo</label>
+      <input type="password" id="sudoPass" placeholder="password" autocomplete="current-password"/>
+    </span>
+    <button type="button" class="ok" id="btnConfirm">Confirm</button>
+    <button type="button" class="no" id="btnCancel">Cancel</button>
+  </div>
+  <form id="f">
+    <textarea id="input" placeholder="Ask something…" required></textarea>
+    <div class="up"><label>Upload</label><input type="file" id="file"/></div>
+    <button id="send">Send</button>
+  </form>
+</div>
+<script src="/ui/app.js"></script>
+</body></html>

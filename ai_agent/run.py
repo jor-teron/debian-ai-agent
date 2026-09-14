@@ -5,11 +5,10 @@ Minimal personal AI agent for Debian — launcher.
 Starts the HTTP server and a background thread for reminders/jobs.
 Stdlib only (no pip / venv / Apache). Local chat page uses HOST/PORT from .env.
 
-Code layout: config.py, tools.py, brain.py, ui.py, server.py, telegram.py, run.py
+Package entry via python3 -m ai_agent (see __main__.py).
 
-Imports from: config.py (paths, version, keys), server.py (Handler),
-              tools.py (background_loop), telegram.py (optional DM bridge).
-Used by: run.sh / systemd (python3 run.py). Nothing imports this file.
+Imports from: ai_agent.config, server, tools, telegram.
+Used by: run.sh / systemd / python3 -m ai_agent.
 """
 import sys
 import threading
@@ -29,10 +28,10 @@ if sys.version_info < (3, 8):
     sys.stderr.write("Try:  python3 run.py   or   ./run.sh\n")
     sys.exit(1)
 
-from config import ENV_PATH, HOST, PORT, ROOT, WORKSPACE, app_version, default_provider, ensure_ws, keys_status
-from server import Handler
-from tools import background_loop
-from telegram import start_telegram_thread
+from ai_agent.config import ENV_PATH, HOST, PORT, ROOT, WORKSPACE, app_version, default_provider, ensure_ws, keys_status
+from ai_agent.server import Handler
+from ai_agent.tools import background_loop
+from ai_agent.telegram import start_telegram_thread
 
 
 # ---------------------------------------------------------------------------
@@ -40,8 +39,19 @@ from telegram import start_telegram_thread
 # ---------------------------------------------------------------------------
 
 
-def main():
-    """Create the workspace, start reminders/jobs, then serve the chat UI."""
+def main(argv=None):
+    """Create the workspace, start reminders/jobs, then serve the chat UI.
+
+    argv: optional CLI args (defaults to sys.argv[1:]). --help / -h prints
+    a short usage line and returns without binding the port.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    if any(a in ("-h", "--help") for a in args):
+        print("linux-ai-agent — local chat agent (stdlib only)")
+        print("Usage: python3 -m ai_agent")
+        print("       ./run.sh")
+        print("Env:   .env next to run.sh (see .env.example)")
+        return
     ensure_ws()
     if not ENV_PATH.exists() and (ROOT / ".env.example").exists():
         print("Tip: copy .env.example to .env and add provider API keys")

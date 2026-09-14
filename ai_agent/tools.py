@@ -6,11 +6,11 @@ jailed to WORKSPACE (whole tree). Shell runs freehand inside bubblewrap when bwr
 is on PATH (network ON by default; SHELL_NET=0 → --unshare-net); otherwise Confirm /
 Telegram YES-NO. sudo always needs confirm. user/ is agent read-only.
 
-Imports from: config.py (paths, BLOCKED, SYSTEM_BASE, keys). Lazily imports
-              brain.py for _http_json (search) and _plain_chat (jobs).
-Used by: brain.py (dispatch, TOOL_DECLS, schemas, build_system),
-         server.py (upload/download/confirm/reminders),
-         run.py (background_loop).
+Imports from: ai_agent.config (paths, BLOCKED, system_prompt, keys).
+              Lazily imports ai_agent.brain for _http_json / _plain_chat.
+Used by: brain (dispatch, TOOL_DECLS, schemas, build_system),
+         server (upload/download/confirm/reminders),
+         run (background_loop).
 """
 import json
 import re
@@ -20,7 +20,7 @@ import time
 import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
-from config import (
+from ai_agent.config import (
     BLOCKED,
     GEMINI_API_BASE,
     JOBS_FILE,
@@ -36,7 +36,7 @@ from config import (
     PROVIDERS,
     REMINDERS_FILE,
     ROOT,
-    SYSTEM_BASE,
+    system_prompt,
     USER_DIR,
     WORKSPACE,
     allow_sudo,
@@ -58,16 +58,16 @@ from config import (
 # Layout:
 #   memory/session.md     — short-lived (auto-cleared; see SESSION_RESET_*)
 #   memory/user.md        — lasting user facts
-#   memory/assistant.md   — extras for the AI (not a copy of SYSTEM_BASE)
+#   memory/assistant.md   — extras for the AI (not a copy of prompt_chat)
 #   memory/date/YYYY_MM.md — monthly logs: "- [YYYY-MM-DD] : text"
 #   memory/topic/<name>.md — same line format
 # Legacy: if workspace/memory.md exists and the new tree is empty, migrate once.
 
 # Caps for prompt injection (chars). Full files still readable via memory_read.
-_MEM_CAP_USER = 3000
-_MEM_CAP_ASSISTANT = 3000
-_MEM_CAP_DATE = 4000
-_MEM_CAP_SESSION = 2000
+_MEM_CAP_USER = 400
+_MEM_CAP_ASSISTANT = 400
+_MEM_CAP_DATE = 400
+_MEM_CAP_SESSION = 400
 
 
 def _read_capped(path, cap):
@@ -243,29 +243,40 @@ def memory_load():
     return res.get("memory") or ""
 
 
-def build_system():
-    """System prompt = SYSTEM_BASE plus capped user/assistant/date/session notes."""
+# Soft total for all memory sections injected into the system prompt.
+_MEM_CAP_TOTAL = 800
+
+
+def build_system(use_tools=False):
+    """System prompt = prompt_chat(+tools) plus soft-capped memory notes.
+
+    use_tools: when True, append prompt_tools (tool/sudo/confirm guidance).
+    Memory sections are capped per-file (~400) and total (~800) to save tokens.
+    """
     ensure_ws()
     migrate_legacy_memory()
     maybe_reset_session()
+    base = system_prompt(use_tools=use_tools)
     chunks = []
-    user = _read_capped(MEMORY_USER, _MEM_CAP_USER).strip()
-    if user:
-        chunks.append("## User facts (memory/user.md)\n" + user)
-    asst = _read_capped(MEMORY_ASSISTANT, _MEM_CAP_ASSISTANT).strip()
-    if asst:
-        chunks.append("## Assistant extras (memory/assistant.md)\n" + asst)
-    month = _read_capped(memory_date_path(), _MEM_CAP_DATE).strip()
-    if month:
-        chunks.append(
-            "## This month (memory/date/%s)\n" % memory_date_path().name + month
-        )
-    sess = _read_capped(MEMORY_SESSION, _MEM_CAP_SESSION).strip()
-    if sess:
-        chunks.append("## Session (memory/session.md)\n" + sess)
+    budget = _MEM_CAP_TOTAL
+    for label, path, cap in (
+        ("User facts (memory/user.md)", MEMORY_USER, _MEM_CAP_USER),
+        ("Assistant extras (memory/assistant.md)", MEMORY_ASSISTANT, _MEM_CAP_ASSISTANT),
+        ("This month (memory/date/%s)" % memory_date_path().name, memory_date_path(), _MEM_CAP_DATE),
+        ("Session (memory/session.md)", MEMORY_SESSION, _MEM_CAP_SESSION),
+    ):
+        if budget <= 0:
+            break
+        body = _read_capped(path, min(cap, budget)).strip()
+        if not body:
+            continue
+        chunks.append("## %s\n%s" % (label, body))
+        budget -= len(body)
     if not chunks:
-        return SYSTEM_BASE
-    return SYSTEM_BASE + "\n\n" + "\n\n".join(chunks)
+        return base
+    return base + "\n\n" + "\n\n".join(chunks)
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -915,7 +926,7 @@ def process_due_jobs():
         if last_ts and (now - last_ts) < mins * 60:
             continue
         prompt = it.get("prompt") or ""
-        from brain import _plain_chat
+        from ai_agent.brain import _plain_chat
         result = _plain_chat(
             "Scheduled job (%s). Respond briefly.\n\n%s" % (it.get("id"), prompt)
         )
@@ -973,7 +984,7 @@ def tool_web_search(query):
 
     tool_shapes = [{"google_search": {}}, {"googleSearch": {}}]
     last_err = ""
-    from brain import _http_json
+    from ai_agent.brain import _http_json
     for tools_obj in tool_shapes:
         body = {
             "contents": [{"role": "user", "parts": [{"text": "Summarize search results for: %s" % q}]}],

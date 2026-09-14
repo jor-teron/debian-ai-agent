@@ -1,13 +1,13 @@
 """
 Config, env, paths, and constants (stdlib only).
 
-Single place for workspace location, listen address, system prompt,
-.env helpers, and optional UI_LIGHT_* theme overrides. Provider catalogs live in providers.py; this module
-re-exports the names brain/server/tools already import so nothing breaks.
+Single place for workspace location, listen address, prompts/blocklist
+loaders, .env helpers, TOOLS_DEFAULT / HISTORY_TURNS, and optional
+UI_LIGHT_* theme overrides. Provider catalogs live in providers.py; this
+module re-exports names brain/server/tools already import.
 
-Imports from: stdlib (os, re, pathlib, datetime); providers.py (catalog).
-Used by: tools.py, brain.py, server.py, run.py, telegram.py, providers.py
-         (lazy load_env only).
+Imports from: stdlib; ai_agent.providers (catalog).
+Used by: tools, brain, server, run, telegram, providers (lazy load_env).
 """
 import os
 import re
@@ -18,8 +18,9 @@ from pathlib import Path
 # Project root and version
 # ---------------------------------------------------------------------------
 
-# Folder that contains this file (the app install directory).
-ROOT = Path(__file__).resolve().parent
+# Package dir (this folder) and install root (parent: run.sh, VERSION, .env).
+PKG_DIR = Path(__file__).resolve().parent
+ROOT = PKG_DIR.parent
 
 
 def app_version():
@@ -134,7 +135,7 @@ def memory_topic_path(name):
 # ---------------------------------------------------------------------------
 
 # catalogs, defaults, key/status helpers, blink period, local base URLs
-from providers import (  # noqa: E402
+from ai_agent.providers import (  # noqa: E402
     DEFAULT_PROVIDER,
     DEFAULT_LLAMACPP_BASE_URL,
     DEFAULT_OLLAMA_BASE_URL,
@@ -174,16 +175,13 @@ def status_blink_ms_config():
 # Safety and the model's system prompt
 # ---------------------------------------------------------------------------
 
-# Commands we refuse even if the user clicks Confirm (destructive / privilege).
-# Case-insensitive. Keep patterns tight to avoid blocking normal workspace cmds.
-BLOCKED = re.compile(
-    r"(?ix)"
-    r"("
-    r"rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/(?:\s|$|\*)"  # rm -rf / or /*
-    r"|rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+~"  # rm -rf ~
-    r"|rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+\$\{?HOME\}?"  # rm -rf $HOME
-    r"|chmod\s+-R\b[^\n]*\s+/(?:\s|$)"  # chmod -R … /
-    r"|chown\s+-R\b[^\n]*\s+/(?:\s|$)"  # chown -R … /
+# Fallback blocklist fragments if shell_blocklist file is missing.
+_BLOCKED_FALLBACK = (
+    r"rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/(?:\s|$|\*)"
+    r"|rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+~"
+    r"|rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+\$\{?HOME\}?"
+    r"|chmod\s+-R\b[^\n]*\s+/(?:\s|$)"
+    r"|chown\s+-R\b[^\n]*\s+/(?:\s|$)"
     r"|\bmkfs\b"
     r"|\bdd\b[^\n]*\bof=/dev/"
     r"|\b(shutdown|reboot|poweroff)\b"
@@ -192,31 +190,82 @@ BLOCKED = re.compile(
     r"|\bwipefs\b"
     r"|\blosetup\b"
     r"|\bsystemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask)\b"
-    r"|(?:curl|wget)\b[^\n]*\|\s*(?:ba)?sh\b"  # curl|sh / wget|sh
-    r"|bash\s+<\(\s*curl\b"  # bash <(curl …
-    r")"
+    r"|(?:curl|wget)\b[^\n]*\|\s*(?:ba)?sh\b"
+    r"|bash\s+<\(\s*curl\b"
 )
 
 
-# Short system prompt. tools.build_system injects memory/ files (user, assistant,
-# current month date log, session). Memory layout: memory/session.md, user.md,
-# assistant.md, date/YYYY_MM.md, topic/*.md.
-# Folders under the jail (WORKSPACE): memory/, workspace/, test/, trash/, user/.
-SYSTEM_BASE = (
-    "Helpful agent on the user's Linux PC. "
-    "Agent jail (whole tree): %s. "
-    "Prefer workspace/ for new files and projects. "
-    "user/ is read-only for the agent (list/read OK; no write/delete). "
-    "Also: memory/, test/, trash/. "
-    "Tools: files, memory, run_shell, web_search, reminders, jobs (workspace only). "
-    "Memory: session.md (short), user.md (facts), assistant.md (extras), "
-    "date/YYYY_MM.md + topic/*.md (logs). "
-    "Shell has network by default; SHELL_NET=0 disables net inside bwrap. "
-    "sudo (if ALLOW_SUDO) always needs Confirm / Telegram YES [password]. "
-    "If run_shell needs confirm, say what you'll run and wait (UI or Telegram YES/NO); "
-    "if it ran already, just report the result. "
-    "Short answers. Name files the user can download."
-) % (WORKSPACE,)
+def _load_shell_blocklist():
+    """Compile BLOCKED from ai_agent/shell_blocklist (one pattern per line).
+
+    Blank lines and # comments are skipped. Missing/unreadable file → safe
+    fallback list baked into this module.
+    """
+    path = PKG_DIR / "shell_blocklist"
+    parts = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts.append(line)
+    except OSError:
+        parts = []
+    body = "|".join(parts) if parts else _BLOCKED_FALLBACK
+    return re.compile(r"(?ix)(" + body + r")")
+
+
+# Commands we refuse even if the user clicks Confirm (destructive / privilege).
+BLOCKED = _load_shell_blocklist()
+
+
+# Tiny built-in prompts if prompt_chat / prompt_tools files are missing.
+_FALLBACK_CHAT = (
+    "Helpful Linux PC agent. Jail: %s. Prefer workspace/; user/ read-only. "
+    "Short answers. Name downloadable files."
+)
+_FALLBACK_TOOLS = (
+    "Tools: files, memory, run_shell, web_search, reminders, jobs. "
+    "sudo needs Confirm / Telegram YES. Shell net on unless SHELL_NET=0."
+)
+
+
+def _read_pkg_text(name):
+    """Read a UTF-8 text file from the package dir, or None if missing."""
+    try:
+        return (PKG_DIR / name).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def load_prompt_chat():
+    """Short system prompt (prompt_chat). Substitutes %%WORKSPACE%% / %WORKSPACE%."""
+    raw = _read_pkg_text("prompt_chat")
+    if raw is None or not raw.strip():
+        text = _FALLBACK_CHAT % (WORKSPACE,)
+    else:
+        text = raw.strip()
+        text = text.replace("%WORKSPACE%", str(WORKSPACE))
+        text = text.replace("%%WORKSPACE%%", str(WORKSPACE))
+    return text
+
+
+def load_prompt_tools():
+    """Extra system text when tools are enabled (prompt_tools file)."""
+    raw = _read_pkg_text("prompt_tools")
+    if raw is None or not raw.strip():
+        return _FALLBACK_TOOLS
+    return raw.strip()
+
+
+def system_prompt(use_tools=False):
+    """Compose system text: prompt_chat, plus prompt_tools when tools are on."""
+    base = load_prompt_chat()
+    if use_tools:
+        extra = load_prompt_tools()
+        if extra:
+            return base + "\n\n" + extra
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +429,60 @@ def ensure_memory_dirs():
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     MEMORY_DATE_DIR.mkdir(parents=True, exist_ok=True)
     MEMORY_TOPIC_DIR.mkdir(parents=True, exist_ok=True)
+
+
+
+# ---------------------------------------------------------------------------
+# Token trim: tools default off, shorter history
+# ---------------------------------------------------------------------------
+
+
+def tools_default():
+    """True when TOOLS_DEFAULT=1/true/yes/on (default: off — chat without tools)."""
+    raw = (_env_get("TOOLS_DEFAULT") or "0").strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def history_turns():
+    """Max prior chat turns sent to the model (HISTORY_TURNS, default 10)."""
+    raw = _env_get("HISTORY_TURNS") or "10"
+    try:
+        n = int(raw.strip())
+    except ValueError:
+        n = 10
+    return max(1, min(n, 50))
+
+
+# Keywords that optionally boost tools on for a single turn (UI may still set flag).
+_TOOL_KEYWORDS = re.compile(
+    r"(?i)\b("
+    r"run|shell|bash|cmd|command|terminal|"
+    r"file|write|read|search|list\s+dir|directory|folder|"
+    r"remind|reminder|job|jobs|memory|memor|"
+    r"download|upload|sudo|workspace"
+    r")\b"
+)
+
+
+def message_wants_tools(message):
+    """True if the user message looks like it needs workspace tools."""
+    return bool(_TOOL_KEYWORDS.search(message or ""))
+
+
+def resolve_use_tools(message, request_flag=None):
+    """Decide whether to send tool schemas for this turn.
+
+    Enable if: TOOLS_DEFAULT=1, OR explicit request_flag True from UI/API,
+    OR message matches tool keywords (optional boost). Explicit False from
+    the client still allows keyword boost when default is off.
+    """
+    if tools_default():
+        return True
+    if request_flag is True:
+        return True
+    if message_wants_tools(message):
+        return True
+    return False
 
 
 def allow_sudo():

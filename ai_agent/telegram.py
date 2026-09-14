@@ -6,10 +6,8 @@ and routes private messages through brain.run_chat (same path as the web UI).
 Shell confirm becomes YES/NO (case-insensitive); sudo may be YES <password>.
 Group chats and non-text are ignored.
 
-Imports from: config.py (token, allow-list, optional provider/model),
-              brain.py (run_chat), tools.py (confirm/cancel pending shell,
-              PENDING_SHELL).
-Used by: run.py (start_telegram_thread).
+Imports from: ai_agent.config, brain, tools.
+Used by: run (start_telegram_thread). Respects TOOLS_DEFAULT via run_chat.
 """
 import json
 import threading
@@ -17,7 +15,7 @@ import time
 import urllib.error
 import urllib.request
 
-from config import (
+from ai_agent.config import (
     PENDING_SHELL,
     default_model,
     default_provider,
@@ -26,8 +24,8 @@ from config import (
     telegram_model,
     telegram_provider,
 )
-from brain import run_chat
-from tools import cancel_pending_shell, confirm_pending_shell
+from ai_agent.brain import run_chat
+from ai_agent.tools import cancel_pending_shell, confirm_pending_shell
 
 
 # Max characters per Telegram sendMessage (Bot API hard limit).

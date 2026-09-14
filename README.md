@@ -1,12 +1,10 @@
 # AI Agent (linux-ai-agent)
 
-Version: see `VERSION` (semver + change #, e.g. `0.2.0 (32)`).
+Version: see `VERSION` (semver + change #, e.g. `0.3.0 (33)`).
 
 Tiny browser chat agent for most Linux distros. Cloud providers (Gemini, ChatGPT, Grok, Claude, DeepSeek, OpenRouter, DeepInfra) plus **Online / Local** modes for Ollama or llama.cpp on your machine.
 
 Install page: https://jor-teron.github.io/linux-ai-agent/
-
-> After this release is pushed, rename the GitHub repo `debian-ai-agent` → `linux-ai-agent` so the new clone/raw/Pages URLs work. Until then, GitHub may still redirect the old name.
 
 ## Dependencies
 
@@ -63,7 +61,7 @@ If you already have the old folder:
 | openrouter | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
 | deepinfra | `DEEPINFRA_API_KEY` | https://deepinfra.com/dash/api_keys |
 
-In the page: **Mode (Online / Local) → Provider → Model**.
+In the page: **Mode (Online / Local) → Provider → Model**. Use the **Tools** checkbox when you want tool schemas (default off to save tokens).
 
 ## Telegram (optional)
 
@@ -79,7 +77,8 @@ Only your chat works. If it asks to run a command, reply **YES** or **NO** (any 
 ## Notes
 
 - Browser: default `127.0.0.1:9191`. For LAN, set `HOST=0.0.0.0` in `.env` and open `http://PC-LAN-IP:9191`. Telegram still optional for away-from-home.
-- Code: `config.py`, `providers.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`, `telegram.py`; `run.py` starts it.
+- Layout: install scripts + docs at repo root; Python package in `ai_agent/` (`python3 -m ai_agent` via `./run.sh`). Edit prompts in `ai_agent/prompt_chat` / `prompt_tools`, UI in `ai_agent/ui/`, model lists in `models_ollama` / `models_llamacpp`, shell blocklist in `shell_blocklist`.
+- Token trim: `TOOLS_DEFAULT=0` (tools off unless UI Tools on or message keywords); `HISTORY_TURNS=10`.
 - Keys only in `.env` (never commit).
 - Files/tools jail: `/home/$USER/ai-workspace` with `memory/`, `workspace/`, `test/`, `trash/`, `user/` (prefer `workspace/` for new work; `user/` is agent read-only)
 - Memory: `ai-workspace/memory/` (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topic/*.md`); legacy `memory.md` migrates once

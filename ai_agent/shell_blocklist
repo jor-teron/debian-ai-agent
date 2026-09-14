@@ -1,0 +1,16 @@
+# Destructive / privilege shell patterns (case-insensitive). One per line.
+rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/(?:\s|$|\*)
+rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+~
+rm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+\$\{?HOME\}?
+chmod\s+-R\b[^\n]*\s+/(?:\s|$)
+chown\s+-R\b[^\n]*\s+/(?:\s|$)
+\bmkfs\b
+\bdd\b[^\n]*\bof=/dev/
+\b(shutdown|reboot|poweroff)\b
+crontab\s+-r\b
+\b(useradd|userdel|passwd)\b
+\bwipefs\b
+\blosetup\b
+\bsystemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask)\b
+(?:curl|wget)\b[^\n]*\|\s*(?:ba)?sh\b
+bash\s+<\(\s*curl\b

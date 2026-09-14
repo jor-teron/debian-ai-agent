@@ -1,14 +1,13 @@
 """
 HTTP UI and API handler (stdlib http.server).
 
-Serves the chat page from ui.py and the JSON routes the browser calls
+Serves the chat page from ai_agent/ui/ (via thin ui.py) and JSON API routes
 (including online/local provider catalog, status LED readiness, and
 optional UI_LIGHT_* theme overrides).
 Does not talk to LLM APIs itself — that is brain.run_chat.
 
-Imports from: config.py (settings, keys), tools.py (upload/download/confirm),
-              brain.py (run_chat), ui.py (HTML page).
-Used by: run.py (ThreadingHTTPServer(..., Handler)).
+Imports from: ai_agent.config, tools, brain, ui (static page loader).
+Used by: run (ThreadingHTTPServer(..., Handler)).
 """
 import base64
 import json
@@ -17,7 +16,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from config import (
+from ai_agent.config import (
     HOST,
     PENDING_SHELL,
     PORT,
@@ -32,7 +31,7 @@ from config import (
     status_blink_ms,
     ui_light_theme,
 )
-from tools import (
+from ai_agent.tools import (
     apply_update,
     cancel_pending_shell,
     confirm_pending_shell,
@@ -44,8 +43,8 @@ from tools import (
     tool_write_bytes,
     tool_write_file,
 )
-from brain import run_chat
-from ui import HTML
+from ai_agent.brain import run_chat
+from ai_agent.ui import load_index, load_static
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +76,22 @@ class Handler(BaseHTTPRequestHandler):
         """Handle GET: page, health, models, reminders, download, pending."""
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
-            # Chat page (HTML/CSS/JS from ui.py)
-            self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
+            # Chat page assembled from ai_agent/ui/ (thin loader in ui.py)
+            self._send(200, load_index().encode("utf-8"), "text/html; charset=utf-8")
+            return
+        if path == "/ui/style.css":
+            body, ctype = load_static("style.css")
+            self._send(200 if body is not None else 404, body or b"not found", ctype)
+            return
+        if path == "/ui/app.js":
+            body, ctype = load_static("app.js")
+            self._send(200 if body is not None else 404, body or b"not found", ctype)
+            return
+        # Alias /static/* → same files (in case HTML is edited to use /static/)
+        if path in ("/static/style.css", "/static/app.js"):
+            name = path.rsplit("/", 1)[-1]
+            body, ctype = load_static(name)
+            self._send(200 if body is not None else 404, body or b"not found", ctype)
             return
         if path == "/api/health":
             # Keys, readiness, version, workspace, due reminders (UI LED + banner)
@@ -231,11 +244,16 @@ class Handler(BaseHTTPRequestHandler):
         if not message:
             self._json(400, {"ok": False, "error": "message required"})
             return
+        # Optional tools flag from UI (bool). None → brain resolves default/keywords.
+        tools_flag = data.get("tools", None)
+        if tools_flag is not None:
+            tools_flag = bool(tools_flag)
         result = run_chat(
             message,
             provider=data.get("provider"),
             model=data.get("model"),
             history=data.get("history") or [],
+            use_tools=tools_flag,
         )
         self._json(200 if result.get("ok") else 400, result)
 

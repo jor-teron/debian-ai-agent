@@ -5,15 +5,13 @@ Talks to cloud APIs and local OpenAI-compatible runtimes (Ollama,
 llama.cpp) via stdlib urllib, and runs tool-call loops. Provider
 catalogs live in providers.py (re-exported through config).
 
-Imports from: config.py (catalog, keys, defaults, base URLs), tools.py
-              (TOOL_DECLS, tool-schema helpers, dispatch, build_system).
-Used by: server.py (run_chat), tools.py (plain chat for jobs, _http_json
-         for web_search).
+Imports from: ai_agent.config, ai_agent.tools.
+Used by: server (run_chat), tools (plain chat for jobs, _http_json).
 """
 import json
 import urllib.error
 import urllib.request
-from config import (
+from ai_agent.config import (
     DEFAULT_PROVIDER,
     GEMINI_API_BASE,
     PROVIDERS,
@@ -21,10 +19,12 @@ from config import (
     default_model,
     default_provider,
     get_provider_meta,
+    history_turns,
     provider_key,
     provider_openai_base,
+    resolve_use_tools,
 )
-from tools import TOOL_DECLS, anthropic_tools, build_system, dispatch, openai_tools
+from ai_agent.tools import TOOL_DECLS, anthropic_tools, build_system, dispatch, openai_tools
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +130,8 @@ def _plain_chat(prompt, provider=None, model=None):
 # ---------------------------------------------------------------------------
 
 
-def gemini_chat(message, model, history):
-    """Chat with Gemini, running workspace tools until the model replies in text."""
+def gemini_chat(message, model, history, use_tools=True):
+    """Chat with Gemini; tools optional (token trim when use_tools=False)."""
     key = provider_key("gemini")
     if not key:
         return {
@@ -144,7 +144,8 @@ def gemini_chat(message, model, history):
 
     model = allowed("gemini", model)
     contents = []
-    for turn in (history or [])[-16:]:
+    n_hist = history_turns()
+    for turn in (history or [])[-n_hist:]:
         role = "user" if turn.get("role") == "user" else "model"
         contents.append({"role": role, "parts": [{"text": turn.get("content", "")}]})
     contents.append({"role": "user", "parts": [{"text": message}]})
@@ -152,14 +153,16 @@ def gemini_chat(message, model, history):
     url = "%s/models/%s:generateContent?key=%s" % (GEMINI_API_BASE, model, key)
     tool_trace = []
     reply = ""
-    system = build_system()
+    system = build_system(use_tools=use_tools)
+    rounds = 6 if use_tools else 1
 
-    for _ in range(6):
+    for _ in range(rounds):
         body = {
             "system_instruction": {"parts": [{"text": system}]},
             "contents": contents,
-            "tools": [{"function_declarations": TOOL_DECLS}],
         }
+        if use_tools:
+            body["tools"] = [{"function_declarations": TOOL_DECLS}]
         try:
             data = _http_json(url, body, {"Content-Type": "application/json"}, timeout=90)
         except urllib.error.HTTPError as e:
@@ -190,7 +193,7 @@ def gemini_chat(message, model, history):
             elif "text" in p:
                 texts.append(p["text"])
 
-        if not fn_calls:
+        if (not use_tools) or (not fn_calls):
             reply = "\n".join(texts).strip() or "(No text)"
             break
 
@@ -243,7 +246,7 @@ def _http_err_no_tools(err_text):
     return "does not support tools" in (err_text or "").lower()
 
 
-def openai_compat_chat(provider, message, model, history):
+def openai_compat_chat(provider, message, model, history, use_tools=True):
     """Chat with an OpenAI-style API, running workspace tools as tool_calls.
 
     Used for cloud OpenAI-compat providers and local Ollama / llama.cpp
@@ -267,8 +270,9 @@ def openai_compat_chat(provider, message, model, history):
         }
 
     model = allowed(provider, model)
-    messages = [{"role": "system", "content": build_system()}]
-    for turn in (history or [])[-16:]:
+    messages = [{"role": "system", "content": build_system(use_tools=use_tools)}]
+    n_hist = history_turns()
+    for turn in (history or [])[-n_hist:]:
         role = "user" if turn.get("role") == "user" else "assistant"
         messages.append({"role": role, "content": turn.get("content", "")})
     messages.append({"role": "user", "content": message})
@@ -288,9 +292,8 @@ def openai_compat_chat(provider, message, model, history):
     tool_trace = []
     reply = ""
 
-    # Skip tools for known tiny local models (avoid a wasted 400). Larger
-    # local models (llama3.2, mistral, …) still try with tools first.
-    use_tools = not _model_lacks_tool_support(model, meta)
+    # Skip tools when caller asked off, or for known tiny local models.
+    use_tools = bool(use_tools) and (not _model_lacks_tool_support(model, meta))
     no_tools_retry_done = False
     # Without tools: single completion only (no tool loop).
     rounds = 1 if not use_tools else 6
@@ -377,8 +380,8 @@ def openai_compat_chat(provider, message, model, history):
 # ---------------------------------------------------------------------------
 
 
-def anthropic_chat(message, model, history):
-    """Chat with Claude, running workspace tools as tool_use / tool_result."""
+def anthropic_chat(message, model, history, use_tools=True):
+    """Chat with Claude; tools optional (token trim when use_tools=False)."""
     meta = PROVIDERS["anthropic"]
     key = provider_key("anthropic")
     if not key:
@@ -392,7 +395,8 @@ def anthropic_chat(message, model, history):
 
     model = allowed("anthropic", model)
     messages = []
-    for turn in (history or [])[-16:]:
+    n_hist = history_turns()
+    for turn in (history or [])[-n_hist:]:
         role = "user" if turn.get("role") == "user" else "assistant"
         messages.append({"role": role, "content": turn.get("content", "")})
     messages.append({"role": "user", "content": message})
@@ -405,16 +409,18 @@ def anthropic_chat(message, model, history):
     }
     tool_trace = []
     reply = ""
-    system = build_system()
+    system = build_system(use_tools=use_tools)
+    rounds = 6 if use_tools else 1
 
-    for _ in range(6):
+    for _ in range(rounds):
         body = {
             "model": model,
             "max_tokens": 4096,
             "system": system,
             "messages": messages,
-            "tools": anthropic_tools(),
         }
+        if use_tools:
+            body["tools"] = anthropic_tools()
         try:
             data = _http_json(url, body, headers, timeout=90)
         except urllib.error.HTTPError as e:
@@ -445,7 +451,7 @@ def anthropic_chat(message, model, history):
             if isinstance(b, dict) and b.get("type") == "text"
         ]
 
-        if not tool_uses:
+        if (not use_tools) or (not tool_uses):
             reply = "\n".join(texts).strip() or "(No text)"
             break
 
@@ -486,8 +492,12 @@ def anthropic_chat(message, model, history):
 # ---------------------------------------------------------------------------
 
 
-def run_chat(message, provider=None, model=None, history=None):
-    """Pick the right chat function from PROVIDERS[id].kind (online + local)."""
+def run_chat(message, provider=None, model=None, history=None, use_tools=None):
+    """Pick the right chat function from PROVIDERS[id].kind (online + local).
+
+    use_tools: None → resolve from TOOLS_DEFAULT / request / keywords;
+    True/False → explicit. When False, no tool schemas are sent.
+    """
     provider = (provider or default_provider() or DEFAULT_PROVIDER).lower().strip()
     if provider not in PROVIDERS:
         return {
@@ -496,12 +506,18 @@ def run_chat(message, provider=None, model=None, history=None):
             "reply": "",
             "tools": [],
         }
+    if use_tools is None:
+        want_tools = resolve_use_tools(message, None)
+    else:
+        # Explicit flag still OR'd with default/keywords via resolve when True-ish;
+        # False means only default+keywords can re-enable.
+        want_tools = resolve_use_tools(message, bool(use_tools))
     meta = PROVIDERS[provider]
     kind = meta["kind"]
     if kind == "gemini":
-        return gemini_chat(message, model, history)
+        return gemini_chat(message, model, history, use_tools=want_tools)
     if kind == "openai":
-        return openai_compat_chat(provider, message, model, history)
+        return openai_compat_chat(provider, message, model, history, use_tools=want_tools)
     if kind == "anthropic":
-        return anthropic_chat(message, model, history)
+        return anthropic_chat(message, model, history, use_tools=want_tools)
     return {"ok": False, "error": "Unsupported provider kind", "reply": "", "tools": []}

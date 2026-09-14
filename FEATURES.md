@@ -1,4 +1,4 @@
-Versioning: `0.2.0 (32)` — semver + change # that +1 every release (never resets).
+Versioning: `0.3.0 (33)` — semver + change # that +1 every release (never resets).
 
 - One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 - Bubblewrap optional in install (`INSTALL_BWRAP=0/1` or prompt); install continues if bwrap unavailable
@@ -7,29 +7,26 @@ Versioning: `0.2.0 (32)` — semver + change # that +1 every release (never rese
 # Features
 
 ## Now
-- **Modular layout** — `config.py` / `providers.py` / `tools.py` / `brain.py` / `ui.py` / `server.py` / `telegram.py` / `run.py` (stdlib only)
+- **Package layout** — `ai_agent/` package (`python3 -m ai_agent`); root keeps install/run scripts, VERSION, `.env.example`, docs. Flat package files + `ai_agent/ui/` for static HTML/CSS/JS
+- **Editable prompts** — `ai_agent/prompt_chat` (short system) + `prompt_tools` (extra when tools on); no giant `SYSTEM_BASE` in config
+- **Token trim** — `TOOLS_DEFAULT=0` (tools schemas omitted by default); UI **Tools** checkbox (localStorage); keyword boost (run/shell/file/…); `HISTORY_TURNS=10`; soft-capped memory injection (~400/section, ~800 total)
+- **Curated model files** — `models_ollama` / `models_llamacpp` (one id per line); `shell_blocklist` for BLOCKED patterns
 - **Online / Local modes** — Mode dropdown before Provider; Provider list filters by mode; Model list by provider; mode persisted in `localStorage` (migrates saved `offline` → `local` once)
 - **Multi-provider chat (online)** — gemini, openai, xai, anthropic, deepseek, openrouter, deepinfra
-- **Local providers** — Ollama (`OLLAMA_BASE_URL`, default `http://127.0.0.1:11434`) and llama.cpp (`LLAMACPP_BASE_URL`, default `http://127.0.0.1:8080`); OpenAI-compatible; no API key; curated small models + Llama 3.1 70B (RAM warning). Local install stays out of `install.sh`
-- **Local tool fallback** — Ollama/local auto-skip or retry without tools when the model lacks tool support (tiny models like tinydolphin/tinyllama)
-- **Status LED** — round LED beside short status (`OK · Gemini` / `No key · …` / `No runtime · …`); green solid when ready; red blink when not; blink period `STATUS_BLINK_MS` (default 2000, `.env` only)
-- **providers.py** — catalogs + `list_modes` / `list_providers` / `list_models` / `get_provider_meta` / `provider_ready`; `config.py` re-exports for compatibility
-- **Workspace folders** — jail = whole `~/ai-workspace` with `memory/`, `workspace/`, `test/`, `trash/`, `user/`; prefer `workspace/` for new work; **`user/` agent read-only**
-- **Light mode default** — dark available; theme toggle in header after version (`localStorage theme=light|dark`)
-- **Softer light theme** — no pure white; soft gray page/panels/bubbles (~25/75); bigger header controls (`#themeBtn`, Update, selects, LED); optional `.env` `UI_LIGHT_*` hex overrides (served via `/api/health` + `/api/models`, applied in light theme only)
-- **Update button** — after Model select → confirm → `POST /api/update` (`git pull --ff-only` + `systemctl --user restart`)
-- Memory — `memory/` tree (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topic/*.md`); optional session reset envs
-- Shell blocklist — destructive patterns blocked; **sudo allowed by default** (`ALLOW_SUDO=1`) but **always Confirm** (UI password / Telegram `YES password`)
-- Shell sandbox — bubblewrap freehand when available; **network ON by default**; `SHELL_NET=0` → `--unshare-net`; without bwrap, Confirm / Telegram YES-NO
-- Sticky confirm bar (sudo password field when pending sudo)
-- Enter sends; Shift+Enter new line
-- Composer — textarea, file upload, and Send aligned to ~44px height
-- Upload / download in the page
-- Web search — Gemini Google Search tool
-- Reminders + scheduled jobs
-- UI port **9191** (default localhost; `HOST=0.0.0.0` for LAN)
-- **Telegram** — YES/NO case-insensitive; sudo: `YES password`; best-effort deleteMessage after password; uses stored/default provider (unchanged)
-- `/api/models` — modes + providers + models + `status_blink_ms` + `ui_light`; `/api/health` — keys, `providers_ready`, optional `selected` readiness for LED, `status_blink_ms`, `ui_light`; `/api/update`
+- **Local providers** — Ollama (`OLLAMA_BASE_URL`) and llama.cpp (`LLAMACPP_BASE_URL`); OpenAI-compatible; no API key; curated small models + Llama 3.1 70B (RAM warning)
+- **Local tool fallback** — Ollama/local auto-skip or retry without tools when the model lacks tool support
+- **Status LED** — green solid when ready; red blink when not; blink period `STATUS_BLINK_MS` (default 2000)
+- **providers.py** — catalogs + readiness helpers; `config.py` re-exports
+- **Workspace folders** — jail = whole `~/ai-workspace` with `memory/`, `workspace/`, `test/`, `trash/`, `user/`; **`user/` agent read-only**
+- **Light mode default** — dark available; optional `.env` `UI_LIGHT_*` hex overrides
+- **Update button** — `POST /api/update` (`git pull --ff-only` + `systemctl --user restart`)
+- Memory — `memory/` tree; optional session reset envs
+- Shell blocklist — destructive patterns blocked; **sudo** always Confirm
+- Shell sandbox — bubblewrap freehand when available; network ON by default; `SHELL_NET=0` → `--unshare-net`
+- Sticky confirm bar; Enter sends; Shift+Enter new line; upload/download
+- Web search — Gemini Google Search tool; reminders + scheduled jobs
+- UI port **9191**; **Telegram** YES/NO / sudo password (same brain path; respects `TOOLS_DEFAULT`)
+- Static UI routes: `/`, `/ui/style.css`, `/ui/app.js`
 
 ## Later
 7. Command allow-list

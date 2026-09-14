@@ -1,0 +1,12 @@
+# One llama.cpp model id per line (# comments ok). Optional: id|label
+tinydolphin|TinyDolphin (~1B)
+tinyllama|TinyLlama (~1B)
+llama-3.2-1b|Llama 3.2 1B
+qwen2.5-0.5b|Qwen2.5 0.5B
+qwen2.5-1.5b|Qwen2.5 1.5B
+gemma-2-2b|Gemma 2 2B
+phi-3-mini|Phi-3 Mini (~3.8B)
+llama-3.2-3b|Llama 3.2 3B
+mistral-7b|Mistral 7B
+llama-3.1-8b|Llama 3.1 8B
+llama-3.1-70b|Llama 3.1 70B (needs lots of RAM)

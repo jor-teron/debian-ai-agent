@@ -7,9 +7,8 @@ local OpenAI-compatible HTTP server and need no key.
 
 Mode: online | local (UI may show Online / Local).
 
-Imports from: config.py lazily inside helpers (load_env / paths) to avoid
-              circular imports at module load.
-Used by: config.py (re-exports), brain.py, server.py, ui.py (via API).
+Imports from: ai_agent.config lazily (load_env) to avoid circular imports.
+Used by: config (re-exports), brain, server, ui (via API).
 """
 from __future__ import annotations
 
@@ -134,9 +133,8 @@ ONLINE_PROVIDERS: Dict[str, Dict[str, Any]] = {
 # Local provider catalog (OpenAI-compatible runtimes)
 # ---------------------------------------------------------------------------
 
-# Curated Ollama tags (~10 under ~10B + one 70B). Tags match common `ollama pull`
-# names; the 70B entry is marked as needing lots of RAM in the UI label.
-_OLLAMA_MODELS: List[Dict[str, str]] = [
+# Built-in curated lists (used when models_ollama / models_llamacpp missing).
+_OLLAMA_MODELS_FALLBACK: List[Dict[str, str]] = [
     {"id": "tinydolphin", "label": "tinydolphin (~1B)"},
     {"id": "tinyllama", "label": "tinyllama (~1B)"},
     {"id": "llama3.2:1b", "label": "llama3.2:1b"},
@@ -147,16 +145,10 @@ _OLLAMA_MODELS: List[Dict[str, str]] = [
     {"id": "llama3.2:3b", "label": "llama3.2:3b"},
     {"id": "mistral:7b", "label": "mistral:7b"},
     {"id": "llama3.1:8b", "label": "llama3.1:8b"},
-    {
-        "id": "llama3.1:70b",
-        "label": "llama3.1:70b (needs lots of RAM)",
-    },
+    {"id": "llama3.1:70b", "label": "llama3.1:70b (needs lots of RAM)"},
 ]
 
-# llama.cpp server model ids passed to /v1/chat/completions. Display labels
-# mirror the Ollama size ladder; the actual GGUF loaded by the server may
-# differ — brain sends model id as the "model" field for OpenAI compat.
-_LLAMACPP_MODELS: List[Dict[str, str]] = [
+_LLAMACPP_MODELS_FALLBACK: List[Dict[str, str]] = [
     {"id": "tinydolphin", "label": "TinyDolphin (~1B)"},
     {"id": "tinyllama", "label": "TinyLlama (~1B)"},
     {"id": "llama-3.2-1b", "label": "Llama 3.2 1B"},
@@ -167,11 +159,44 @@ _LLAMACPP_MODELS: List[Dict[str, str]] = [
     {"id": "llama-3.2-3b", "label": "Llama 3.2 3B"},
     {"id": "mistral-7b", "label": "Mistral 7B"},
     {"id": "llama-3.1-8b", "label": "Llama 3.1 8B"},
-    {
-        "id": "llama-3.1-70b",
-        "label": "Llama 3.1 70B (needs lots of RAM)",
-    },
+    {"id": "llama-3.1-70b", "label": "Llama 3.1 70B (needs lots of RAM)"},
 ]
+
+
+def _load_model_list_file(filename, fallback):
+    """Load curated models from a package text file (one id per line).
+
+    Format: `id` or `id|label`. Blank lines and # comments skipped.
+    Missing/empty file → fallback list.
+    """
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / filename
+    out: List[Dict[str, str]] = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "|" in line:
+                mid, label = line.split("|", 1)
+                mid, label = mid.strip(), label.strip()
+            else:
+                mid, label = line, line
+            if mid:
+                out.append({"id": mid, "label": label or mid})
+    except OSError:
+        out = []
+    return out if out else list(fallback)
+
+
+# Prefer ai_agent/models_ollama and models_llamacpp when present.
+_OLLAMA_MODELS: List[Dict[str, str]] = _load_model_list_file(
+    "models_ollama", _OLLAMA_MODELS_FALLBACK
+)
+_LLAMACPP_MODELS: List[Dict[str, str]] = _load_model_list_file(
+    "models_llamacpp", _LLAMACPP_MODELS_FALLBACK
+)
 
 # Default local OpenAI-compat base URLs (overridable via .env).
 DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
@@ -241,7 +266,7 @@ def _env_get(name: str) -> str:
     """
     import os
 
-    from config import load_env
+    from ai_agent.config import load_env
 
     return (load_env().get(name) or os.environ.get(name) or "").strip()
 

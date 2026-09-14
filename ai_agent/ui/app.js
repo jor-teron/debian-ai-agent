@@ -1,143 +1,3 @@
-"""
-Browser chat page (soft light default, dark available; sticky confirm; Enter=send).
-
-This module holds the single HTML/CSS/JS page the user sees in the browser.
-The page talks to the JSON APIs on server.py (/api/chat, /api/health, …).
-
-Header: Mode (Online|Local) → Provider → Model; status LED (green solid /
-red blink) beside a short status string. Composer row aligns textarea, file
-upload, and Send to the same height.
-
-Imports from: nothing (string constant only).
-Used by: server.py (GET / and /index.html serve HTML).
-"""
-
-# ---------------------------------------------------------------------------
-# Page markup
-# ---------------------------------------------------------------------------
-
-# Full chat page: header (status LED, mode, provider, model, update, theme),
-# message log, sticky confirm dock (optional sudo password), and the composer.
-# Light is the default theme (localStorage theme=light|dark). Enter sends;
-# Shift+Enter is a new line. Confirm/Cancel appear when a shell command is pending.
-# Mode/Provider/Model persist in localStorage (mode, p, m:<provider>).
-HTML = r"""<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
-<meta name="color-scheme" content="light dark"/>
-<meta name="theme-color" content="#d8dde5"/>
-<title>AI Agent</title>
-<style>
-/* ---- Light (default): soft gray ~25/75, no pure white ---- */
-:root, [data-theme="light"]{
-  color-scheme:light;
-  --bg:#d8dde5; --panel:#e4e8ef; --border:#9aa3b2; --text:#1a2332;
-  --muted:#4a5568; --user:#b8c0cc; --bot:#c5cad3; --bot-border:#8b94a3;
-  --accent:#2563eb; --accent-fg:#0c1220; --ok:#059669; --bad:#dc2626;
-  --warn:#b45309; --confirm-bg:#efe6d4; --confirm-border:#c4a574;
-  --confirm-code-bg:#e8dcc0; --confirm-code:#92400e; --input-bg:#e4e8ef;
-}
-/* ---- Dark ---- */
-[data-theme="dark"]{
-  color-scheme:dark;
-  --bg:#0f1419; --panel:#1a2332; --border:#2a3548; --text:#e7ecf3;
-  --muted:#9aa8bc; --user:#243247; --bot:#1a2332; --bot-border:#2a3548;
-  --accent:#60a5fa; --accent-fg:#041018; --ok:#6ee7b7; --bad:#f87171;
-  --warn:#fbbf24; --confirm-bg:#3a2a12; --confirm-border:#5a4020;
-  --confirm-code-bg:#1a1208; --confirm-code:#fde68a; --input-bg:#0c1118;
-}
-*{box-sizing:border-box}
-html,body{height:100%;margin:0}
-body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;height:100vh;overflow:hidden}
-header{flex:0 0 auto;padding:12px 16px;background:var(--panel);display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
-h1{font-size:1.05rem;margin:0;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-h1 .ver{font-size:.75rem;font-weight:500;color:var(--muted)}
-/* Bigger header controls — easier to hit (theme, update, selects, LED) */
-#themeBtn{padding:6px 12px;font-size:1.15rem;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;cursor:pointer;line-height:1}
-#themeBtn:hover{color:var(--text)}
-.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.field{display:flex;gap:6px;align-items:center}
-label{font-size:.8rem;color:var(--muted);white-space:nowrap}
-select,button,textarea,input[type=file],input[type=password]{font:inherit;border-radius:8px;border:1px solid var(--border);background:var(--input-bg);color:var(--text)}
-select{padding:6px 8px}
-.controls select{padding:8px 10px;font-size:.9rem}
-#btnUpdate{padding:8px 14px;font-size:.9rem;background:var(--panel);color:var(--text);border:1px solid var(--border);font-weight:600;cursor:pointer}
-#btnUpdate:hover{border-color:var(--accent)}
-/* ---- Status LED + short text ---- */
-#statusWrap{display:flex;align-items:center;gap:8px;margin-right:4px;max-width:280px}
-#led{width:12px;height:12px;border-radius:50%;flex:0 0 auto;background:var(--muted);box-shadow:0 0 0 1px rgba(0,0,0,.12)}
-#led.ok{background:var(--ok);animation:none}
-#led.bad{background:var(--bad);animation:led-blink var(--blink,2000ms) step-end infinite}
-@keyframes led-blink{0%,100%{opacity:1}50%{opacity:.15}}
-#status{font-size:.8rem;color:var(--muted);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#status.ok{color:var(--ok)}#status.bad{color:var(--bad)}
-#note{flex:0 0 auto;font-size:.75rem;color:var(--warn);padding:0 16px;min-height:0}
-#log{flex:1 1 auto;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:0}
-.msg{max-width:820px;padding:10px 12px;border-radius:12px;white-space:pre-wrap;line-height:1.4}
-.user{align-self:flex-end;background:var(--user)}
-.bot{align-self:flex-start;background:var(--bot);border:1px solid var(--bot-border)}
-.tools{margin-top:6px;font-size:.75rem;color:var(--muted)}
-.dl{margin-top:6px;font-size:.8rem}
-.dl a{color:var(--accent)}
-#dock{flex:0 0 auto;background:var(--panel);border-top:1px solid var(--border)}
-#confirm{display:none;padding:10px 16px;background:var(--confirm-bg);border-bottom:1px solid var(--confirm-border);gap:8px;flex-wrap:wrap;align-items:center}
-#confirm.show{display:flex}
-#confirm .label{font-size:.85rem;color:var(--warn);font-weight:600}
-#confirm code{flex:1;min-width:120px;word-break:break-all;font-size:.85rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--confirm-code);background:var(--confirm-code-bg);padding:6px 8px;border-radius:6px}
-#sudoPassWrap{display:none;align-items:center;gap:6px}
-#sudoPassWrap.show{display:flex}
-#sudoPass{padding:6px 8px;min-width:140px}
-#confirm .ok{background:var(--ok);color:#041018}#confirm .no{background:var(--bad);color:#041018}
-/* Composer: match heights of textarea, upload block, Send (~44px) */
-form#f{display:flex;gap:8px;padding:12px;flex-wrap:wrap;align-items:center}
-#f textarea{flex:1;min-height:44px;height:44px;padding:8px 10px;min-width:160px;resize:vertical;max-height:160px;line-height:1.3}
-#f .up{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:44px;height:44px}
-#f .up label{font-size:.7rem;line-height:1;margin:0}
-#f .up input[type=file]{font-size:.75rem;padding:4px 6px;height:28px;max-width:180px}
-#f #send{height:44px;min-height:44px;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;background:var(--accent);border:none;color:var(--accent-fg);font-weight:600;cursor:pointer}
-button:disabled{opacity:.5}
-.up{font-size:.75rem}
-</style></head><body>
-<header>
-  <h1>AI Agent <span class="ver" id="ver">…</span>
-    <button type="button" id="themeBtn" title="Toggle light/dark theme" aria-label="Toggle theme">◐</button>
-  </h1>
-  <div class="controls">
-    <div id="statusWrap" title="Provider readiness">
-      <span id="led" aria-hidden="true"></span>
-      <div id="status">…</div>
-    </div>
-    <div class="field"><label for="mode">Mode</label>
-      <select id="mode"></select>
-    </div>
-    <div class="field"><label for="provider">Provider</label>
-      <select id="provider"></select>
-    </div>
-    <div class="field"><label for="model">Model</label>
-      <select id="model"></select>
-    </div>
-    <button type="button" id="btnUpdate" title="git pull and restart service">Update</button>
-  </div>
-</header>
-<div id="note"></div>
-<div id="log"></div>
-<div id="dock">
-  <div id="confirm">
-    <span class="label">Run shell?</span>
-    <code id="pendingCmd"></code>
-    <span id="sudoPassWrap"><label for="sudoPass">sudo</label>
-      <input type="password" id="sudoPass" placeholder="password" autocomplete="current-password"/>
-    </span>
-    <button type="button" class="ok" id="btnConfirm">Confirm</button>
-    <button type="button" class="no" id="btnCancel">Cancel</button>
-  </div>
-  <form id="f">
-    <textarea id="input" placeholder="Ask something…" required></textarea>
-    <div class="up"><label>Upload</label><input type="file" id="file"/></div>
-    <button id="send">Send</button>
-  </form>
-</div>
-<script>
 const log=document.getElementById('log'),provider=document.getElementById('provider');
 const model=document.getElementById('model'),modeSel=document.getElementById('mode');
 const status=document.getElementById('status'),led=document.getElementById('led');
@@ -146,6 +6,7 @@ const note=document.getElementById('note'),confirmBar=document.getElementById('c
 const fileInput=document.getElementById('file');
 const sudoPassWrap=document.getElementById('sudoPassWrap'),sudoPass=document.getElementById('sudoPass');
 const themeBtn=document.getElementById('themeBtn');
+const toolsToggle=document.getElementById('toolsToggle');
 /* catalog from /api/models: modes, providers[{label,mode,needs_key,models[{id,label}]}], defaults */
 let catalog={modes:[],providers:{},default_provider:'gemini',default_model:'gemini-3.5-flash-lite',default_mode:'online',status_blink_ms:2000};
 let history=[], keys={}, providersReady={};
@@ -196,6 +57,16 @@ themeBtn.onclick=()=>{
   const cur=document.documentElement.getAttribute('data-theme')||'light';
   applyTheme(cur==='dark'?'light':'dark');
 };
+
+/* Tools toggle: persisted; default off (matches TOOLS_DEFAULT=0). */
+(function initTools(){
+  const s=localStorage.getItem('tools');
+  toolsToggle.checked = (s==='1' || s==='true');
+})();
+toolsToggle.onchange=()=>{
+  localStorage.setItem('tools', toolsToggle.checked?'1':'0');
+};
+
 
 /** Store ui_light map from API and re-apply if currently in light theme. */
 function setUiLight(obj){
@@ -470,7 +341,7 @@ document.getElementById('f').onsubmit=async ev=>{
   add('user',message); input.value=''; send.disabled=true;
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message,provider:provider.value,model:model.value,history})});
+      body:JSON.stringify({message,provider:provider.value,model:model.value,history,tools:!!toolsToggle.checked})});
     const data=await res.json();
     if(!data.ok) add('bot', data.error||'Failed', data.tools); else {
       add('bot', data.reply, data.tools);
@@ -492,5 +363,3 @@ setInterval(async()=>{try{
   if(h.due_reminders&&h.due_reminders.length) note.textContent='Due reminders: '+h.due_reminders.map(r=>r.text).join('; ');
   else if(note.textContent.startsWith('Due reminders:')) note.textContent='';
 }catch(e){}}, 15000);
-</script></body></html>
-"""
