@@ -21,16 +21,19 @@ from config import (
     PORT,
     PROVIDERS,
     WORKSPACE,
+    allow_sudo,
     app_version,
     default_model,
     default_provider,
     keys_status,
 )
 from tools import (
+    apply_update,
     cancel_pending_shell,
     confirm_pending_shell,
     safe_path,
     shell_freehand,
+    shell_net_enabled,
     shell_sandbox_mode,
     tool_reminder_list,
     tool_write_bytes,
@@ -91,6 +94,8 @@ class Handler(BaseHTTPRequestHandler):
                     "default_provider": default_provider(),
                     "shell_sandbox": shell_sandbox_mode(),
                     "shell_freehand": shell_freehand(),
+                    "shell_net": shell_net_enabled(),
+                    "allow_sudo": allow_sudo(),
                     "due_reminders": [
                         {"id": r.get("id"), "text": r.get("text"), "due": r.get("due")} for r in due
                     ],
@@ -144,7 +149,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
             return
         if path == "/api/pending":
-            # Sticky confirm bar polls this: {command: "..."} or {command: null}
+            # Sticky confirm bar polls this: {command, sudo} or {command: null}
             if PENDING_SHELL.exists():
                 self._json(200, json.loads(PENDING_SHELL.read_text(encoding="utf-8")))
             else:
@@ -153,18 +158,33 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"ok": False, "error": "Not found"})
 
     def do_POST(self):  # noqa: N802
-        """Handle POST: confirm/cancel shell, upload, chat."""
+        """Handle POST: confirm/cancel shell, upload, update, chat."""
         path = self.path.split("?", 1)[0]
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b""
 
         if path == "/api/confirm":
-            # User clicked Confirm — run the queued shell command
-            self._json(200, confirm_pending_shell())
+            # User clicked Confirm — optional JSON {password} for sudo (never logged)
+            password = None
+            if raw:
+                try:
+                    body = json.loads(raw.decode("utf-8") or "{}")
+                    if isinstance(body, dict) and body.get("password") is not None:
+                        password = str(body.get("password"))
+                except json.JSONDecodeError:
+                    password = None
+            try:
+                self._json(200, confirm_pending_shell(password=password))
+            finally:
+                password = None
             return
         if path == "/api/cancel":
             # User clicked Cancel — drop the queued command
             self._json(200, cancel_pending_shell())
+            return
+        if path == "/api/update":
+            # git pull --ff-only then schedule systemctl --user restart
+            self._json(200, apply_update())
             return
         if path == "/api/upload":
             # Browser file picker: text as UTF-8, binaries as base64

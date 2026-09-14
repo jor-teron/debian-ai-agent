@@ -3,7 +3,8 @@ Optional Telegram DM bridge (long polling, no webhook).
 
 When TELEGRAM_BOT_TOKEN is set in .env, a background thread polls getUpdates
 and routes private messages through brain.run_chat (same path as the web UI).
-Shell confirm becomes YES/NO in the chat. Group chats and non-text are ignored.
+Shell confirm becomes YES/NO (case-insensitive); sudo may be YES <password>.
+Group chats and non-text are ignored.
 
 Imports from: config.py (token, allow-list, optional provider/model),
               brain.py (run_chat), tools.py (confirm/cancel pending shell,
@@ -123,65 +124,157 @@ def _is_allowed(chat_id):
 # ---------------------------------------------------------------------------
 
 
-def _pending_command():
-    """Return the queued shell command string, or None."""
+def _pending_shell():
+    """Return pending dict {command, sudo} or None."""
     if not PENDING_SHELL.exists():
         return None
     try:
         data = json.loads(PENDING_SHELL.read_text(encoding="utf-8"))
-        return (data.get("command") or "").strip() or None
+        cmd = (data.get("command") or "").strip()
+        if not cmd:
+            return None
+        return {"command": cmd, "sudo": bool(data.get("sudo"))}
     except Exception:  # noqa: BLE001
         return None
 
 
+def _pending_command():
+    """Return the queued shell command string, or None."""
+    p = _pending_shell()
+    return p["command"] if p else None
+
+
+def _try_delete_message(chat_id, message_id, token=None):
+    """Best-effort deleteMessage (e.g. after reading a sudo password). Never raises."""
+    if not message_id:
+        return
+    try:
+        api_call(
+            "deleteMessage",
+            {"chat_id": chat_id, "message_id": message_id},
+            token=token,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def maybe_prompt_shell_confirm(chat_id, token=None):
     """If a pending shell exists, ask the user to reply YES or NO (once per cmd)."""
-    cmd = _pending_command()
-    if not cmd:
+    pend = _pending_shell()
+    if not pend:
         _last_shell_prompt.pop(chat_id, None)
         return False
+    cmd = pend["command"]
     prev = _last_shell_prompt.get(chat_id)
     if prev == cmd:
         return True  # already prompted for this command
-    msg = "Run shell?\n`%s`\nReply YES or NO." % cmd
+    if pend.get("sudo"):
+        msg = (
+            "Run sudo shell?\n`%s`\n"
+            "Reply YES <password> or Y <password> (or YES alone to try passwordless). "
+            "NO to cancel."
+        ) % cmd
+    else:
+        msg = "Run shell?\n`%s`\nReply YES or NO." % cmd
     send_text(chat_id, msg, token=token)
     _last_shell_prompt[chat_id] = cmd
     return True
 
 
-def _handle_shell_reply(chat_id, text, token=None):
-    """If pending shell exists, handle YES/NO (or remind). Returns True if consumed."""
-    cmd = _pending_command()
-    if not cmd:
+def _parse_yes_no(text):
+    """Parse confirm reply. Returns ('yes', password_or_None) | ('no', None) | (None, None).
+
+    Accepts yes/YES/Yes/Y/y and no/NO/etc case-insensitive.
+    For sudo: 'YES password' / 'Y password' → password = rest of line after first token.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None, None
+    parts = raw.split(None, 1)
+    token = parts[0].lower()
+    rest = parts[1] if len(parts) > 1 else None
+    if token in ("yes", "y"):
+        return "yes", rest  # rest may be sudo password; None if plain YES
+    if token in ("no", "n"):
+        return "no", None
+    return None, None
+
+
+def _format_confirm_result(result):
+    """Build Telegram reply text from confirm_pending_shell result."""
+    if result.get("ok"):
+        stdout = (result.get("stdout") or "").strip()
+        stderr = (result.get("stderr") or "").strip()
+        body = []
+        if stdout:
+            body.append(stdout)
+        if stderr:
+            body.append(stderr)
+        if body:
+            return "Done.\n" + "\n".join(body)
+        return "Done."
+    return result.get("error") or "Command failed"
+
+
+def _handle_shell_reply(chat_id, text, token=None, message_id=None):
+    """If pending shell exists, handle YES/NO (or remind). Returns True if consumed.
+
+    For sudo pending: YES <password> feeds sudo -S. Plain YES tries sudo -n.
+    Password is never stored in memory files; best-effort delete of the TG message.
+    """
+    pend = _pending_shell()
+    if not pend:
         return False
-    low = (text or "").strip().lower()
-    if low in ("yes", "y"):
-        result = confirm_pending_shell()
+    cmd = pend["command"]
+    is_sudo = bool(pend.get("sudo"))
+    kind, secret = _parse_yes_no(text)
+    if kind == "yes":
+        password = None
+        had_password = False
+        if is_sudo:
+            if secret is not None and str(secret) != "":
+                password = str(secret)
+                had_password = True
+                # Best-effort: remove the message that contained the password.
+                _try_delete_message(chat_id, message_id, token=token)
+            # else: try sudo -n (password=None)
+        try:
+            result = confirm_pending_shell(password=password)
+        finally:
+            password = None
+            secret = None
         _last_shell_prompt.pop(chat_id, None)
-        out_parts = []
-        if result.get("ok"):
-            stdout = (result.get("stdout") or "").strip()
-            stderr = (result.get("stderr") or "").strip()
-            body = []
-            if stdout:
-                body.append(stdout)
-            if stderr:
-                body.append(stderr)
-            if body:
-                out_parts.append("Done.\n" + "\n".join(body))
-            else:
-                out_parts.append("Done.")
-        else:
-            out_parts.append(result.get("error") or "Command failed")
-        send_text(chat_id, "\n".join(out_parts), token=token)
+        send_text(chat_id, _format_confirm_result(result), token=token)
+        # If sudo failed without a password, hint the YES <password> form.
+        if is_sudo and not result.get("ok") and not had_password:
+            err_blob = (
+                (result.get("stderr") or "")
+                + " "
+                + (result.get("error") or "")
+                + " "
+                + (result.get("stdout") or "")
+            ).lower()
+            if "password" in err_blob or result.get("exit_code") not in (None, 0):
+                send_text(
+                    chat_id,
+                    "Sudo needs a password — reply: YES yourpassword",
+                    token=token,
+                )
         return True
-    if low in ("no", "n"):
+    if kind == "no":
         cancel_pending_shell()
         _last_shell_prompt.pop(chat_id, None)
         send_text(chat_id, "Shell cancelled.", token=token)
         return True
     # Pending but not YES/NO — require a clear answer first.
-    send_text(chat_id, "Pending shell — reply YES or NO", token=token)
+    if is_sudo:
+        send_text(
+            chat_id,
+            "Pending sudo — reply YES <password> or NO",
+            token=token,
+        )
+    else:
+        send_text(chat_id, "Pending shell — reply YES or NO", token=token)
     maybe_prompt_shell_confirm(chat_id, token=token)
     return True
 
@@ -243,7 +336,7 @@ def handle_message(update, token=None):
         return
 
     # Shell confirm takes priority over normal chat.
-    if _handle_shell_reply(chat_id, text, token=token):
+    if _handle_shell_reply(chat_id, text, token=token, message_id=msg.get("message_id")):
         return
 
     provider = telegram_provider()

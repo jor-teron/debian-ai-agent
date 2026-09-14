@@ -2,8 +2,9 @@
 Workspace tools: files, shell, memory, reminders, jobs, web_search.
 
 The model calls these through brain.py → dispatch(). File and shell work is
-jailed to WORKSPACE. Shell runs freehand inside bubblewrap when bwrap is on PATH;
-otherwise commands wait for UI Confirm / Telegram YES-NO.
+jailed to WORKSPACE (whole tree). Shell runs freehand inside bubblewrap when bwrap
+is on PATH (network ON by default; SHELL_NET=0 → --unshare-net); otherwise Confirm /
+Telegram YES-NO. sudo always needs confirm. user/ is agent read-only.
 
 Imports from: config.py (paths, BLOCKED, SYSTEM_BASE, keys). Lazily imports
               brain.py for _http_json (search) and _plain_chat (jobs).
@@ -12,6 +13,7 @@ Used by: brain.py (dispatch, TOOL_DECLS, schemas, build_system),
          run.py (background_loop).
 """
 import json
+import re
 import shutil
 import subprocess
 import time
@@ -33,15 +35,20 @@ from config import (
     PENDING_SHELL,
     PROVIDERS,
     REMINDERS_FILE,
+    ROOT,
     SYSTEM_BASE,
+    USER_DIR,
     WORKSPACE,
+    allow_sudo,
     allowed,
+    app_version,
     ensure_memory_dirs,
     ensure_ws,
     memory_date_path,
     memory_topic_path,
     provider_key,
     session_should_reset,
+    shell_net_env_off,
 )
 
 
@@ -277,8 +284,28 @@ def safe_path(user_path: str) -> Path:
     return cand
 
 
+def path_under_user(path: Path) -> bool:
+    """True if path is inside WORKSPACE/user/ (agent read-only zone)."""
+    try:
+        path.resolve().relative_to(USER_DIR.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _reject_user_write(path: Path):
+    """Return an error dict if path is under user/; else None."""
+    if path_under_user(path):
+        return {
+            "ok": False,
+            "error": "user/ is read-only for the agent (list/read only)",
+            "path": str(path),
+        }
+    return None
+
+
 def tool_list_dir(path: str = ".") -> dict:
-    """List files and folders under a workspace path."""
+    """List files and folders under a workspace path (user/ allowed)."""
     ensure_ws()
     t = safe_path(path)
     if not t.is_dir():
@@ -288,7 +315,7 @@ def tool_list_dir(path: str = ".") -> dict:
 
 
 def tool_read_file(path: str) -> dict:
-    """Read a text file in the workspace (first 200 KB)."""
+    """Read a text file in the workspace (user/ allowed; first 200 KB)."""
     ensure_ws()
     t = safe_path(path)
     if not t.is_file():
@@ -298,37 +325,52 @@ def tool_read_file(path: str) -> dict:
 
 
 def tool_write_file(path: str, content: str) -> dict:
-    """Write a UTF-8 text file in the workspace (creates parent folders)."""
+    """Write a UTF-8 text file in the workspace (blocked under user/)."""
     ensure_ws()
     t = safe_path(path)
+    err = _reject_user_write(t)
+    if err:
+        return err
     t.parent.mkdir(parents=True, exist_ok=True)
     t.write_text(content, encoding="utf-8")
     return {"ok": True, "path": str(t), "name": t.name}
 
 
 def tool_write_bytes(path: str, data: bytes) -> dict:
-    """Write raw bytes (used by the upload API for non-text files)."""
+    """Write raw bytes (upload API; blocked under user/)."""
     ensure_ws()
     t = safe_path(path)
+    err = _reject_user_write(t)
+    if err:
+        return err
     t.parent.mkdir(parents=True, exist_ok=True)
     t.write_bytes(data)
     return {"ok": True, "path": str(t), "name": t.name, "bytes": len(data)}
+
 
 
 # ---------------------------------------------------------------------------
 # Shell sandbox (bubblewrap freehand when available; else UI/Telegram confirm)
 # ---------------------------------------------------------------------------
 # When `bwrap` is on PATH, shell commands run immediately inside bubblewrap:
-#   - WORKSPACE bind RW, cwd there
+#   - WORKSPACE bind RW, cwd there; user/ rebound RO
 #   - Host tools RO (/usr + /bin /sbin /lib /lib64 if present — usrmerge-safe)
 #   - Minimal RO: resolv.conf, ssl/ca-certificates, passwd/group; --dev / --proc
-#   - Network ON (no --unshare-net); --unshare-pid --die-with-parent
-#   - Still blocked by BLOCKED regex and sudo
-# Without bwrap: keep the old PENDING_SHELL → Confirm / Telegram YES-NO flow.
+#   - Network ON by default (no --unshare-net); SHELL_NET=0 adds --unshare-net
+#   - --unshare-pid --die-with-parent
+#   - BLOCKED regex always; sudo always needs Confirm (even with bwrap)
+# Without bwrap: PENDING_SHELL → Confirm / Telegram YES-NO (no net isolation).
 
 
 _BWRAP_BIN = None  # None = not probed yet; "" = missing; else absolute path
 _BWRAP_BIND_TRY = None  # None = not probed; True/False = --ro-bind-try support
+
+# Tokens that suggest a shell command may write/delete (used with user/ path check).
+_WRITE_SHELL_RE = re.compile(
+    r"(?ix)(?:^|[\s;&|])(?:rm|rmdir|unlink|shred|truncate|mv|cp|install|tee|touch|"
+    r"mkdir|chmod|chown|ln|dd|sed\s+-i|gzip|gunzip|bzip2|"
+    r"xz|zip|tar\s+[^\n]*[crux])\b|(?:>>?|2>>?)"
+)
 
 
 def bwrap_available():
@@ -345,8 +387,19 @@ def shell_sandbox_mode():
 
 
 def shell_freehand():
-    """True when run_shell executes immediately (no Confirm / YES-NO)."""
+    """True when non-sudo run_shell executes immediately (no Confirm / YES-NO)."""
     return bwrap_available()
+
+
+def shell_net_enabled():
+    """True if shell processes have network access.
+
+    Default True. With bwrap, SHELL_NET=0/false/no/off adds --unshare-net.
+    Without bwrap there is no isolation (always True).
+    """
+    if not bwrap_available():
+        return True
+    return not shell_net_env_off()
 
 
 def _bwrap_has_bind_try():
@@ -383,16 +436,25 @@ def _build_bwrap_argv(cmd):
     """Build argv: bwrap … -- /bin/bash -lc <cmd> (cwd = WORKSPACE).
 
     Skips --new-session so subprocess can still capture stdout/stderr cleanly.
+    Network stays shared unless SHELL_NET=0 (then --unshare-net).
+    user/ is rebound read-only after the RW workspace bind.
     """
     ws = str(WORKSPACE.resolve())
+    user = str(USER_DIR.resolve())
     argv = [
         _BWRAP_BIN or "bwrap",
         "--die-with-parent",
         "--unshare-pid",
-        # Network stays shared (do NOT pass --unshare-net).
-        "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-        "--ro-bind", "/usr", "/usr",
     ]
+    # Default: keep host network. Opt out with SHELL_NET=0.
+    if shell_net_env_off():
+        argv.append("--unshare-net")
+    argv.extend(
+        [
+            "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            "--ro-bind", "/usr", "/usr",
+        ]
+    )
     # Debian usrmerge: /bin may be a symlink into /usr; bind only if present.
     for p in ("/bin", "/sbin", "/lib", "/lib64"):
         if Path(p).exists():
@@ -409,6 +471,8 @@ def _build_bwrap_argv(cmd):
     argv.extend(
         [
             "--bind", ws, ws,
+            # After RW bind of the whole jail, lock user/ to read-only.
+            "--ro-bind", user, user,
             "--chdir", ws,
             "--dev", "/dev",
             "--proc", "/proc",
@@ -419,13 +483,82 @@ def _build_bwrap_argv(cmd):
     return argv
 
 
-def _shell_execute(cmd):
+def command_is_sudo(cmd):
+    """True if the command invokes sudo as the first token (after optional env)."""
+    s = (cmd or "").strip()
+    if not s:
+        return False
+    # Strip simple leading VAR=value assignments: FOO=1 sudo …
+    while True:
+        m = re.match(r"^[A-Za-z_][A-Za-z0-9_]*=\S*\s+", s)
+        if not m:
+            break
+        s = s[m.end() :]
+    first = s.split(None, 1)[0] if s else ""
+    return first == "sudo" or first.endswith("/sudo")
+
+
+def _sudo_inject_flags(cmd, flags):
+    """Insert flags after the sudo token: 'sudo -S …' / 'sudo -n …'."""
+    return re.sub(r"(^|[\s;|&])sudo\b", r"\1sudo " + flags, (cmd or "").strip(), count=1)
+
+
+def _shell_mentions_user_path(cmd):
+    """True if cmd appears to reference a path under WORKSPACE/user/."""
+    s = cmd or ""
+    user_res = str(USER_DIR.resolve())
+    if user_res in s or str(USER_DIR) in s:
+        return True
+    # Relative user/… tokens (avoid matching only memory/user.md)
+    if re.search(r"(?x)(?:^|[\s\"'=])(?:\./)?user/", s):
+        return True
+    return False
+
+
+def shell_would_write_user(cmd):
+    """Heuristic: True if cmd looks like it would write/delete under user/."""
+    if not _shell_mentions_user_path(cmd):
+        return False
+    if _WRITE_SHELL_RE.search(cmd or ""):
+        return True
+    if re.search(r"(?x)>>?\s*[\"']?(?:\./)?user/", cmd or ""):
+        return True
+    return False
+
+
+def _shell_execute(cmd, password=None):
     """Run a command in the workspace with a 30s timeout. Internal only.
 
-    With bwrap: argv = bubblewrap wrap around bash -lc. Without: shell=True as before.
+    Non-sudo: bwrap when available, else shell=True.
+    Sudo: always host shell (not bwrap); password fed via sudo -S on stdin
+    when provided (never logged). No password → try sudo -n.
     """
+    is_sudo = command_is_sudo(cmd)
     try:
-        if bwrap_available():
+        if is_sudo:
+            # Never run sudo inside bwrap (needs real privileges + stdin).
+            if password is not None:
+                run_cmd = _sudo_inject_flags(cmd, "-S")
+                p = subprocess.run(
+                    run_cmd,
+                    shell=True,
+                    cwd=str(WORKSPACE),
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    input=(password + "\n"),
+                )
+            else:
+                run_cmd = _sudo_inject_flags(cmd, "-n")
+                p = subprocess.run(
+                    run_cmd,
+                    shell=True,
+                    cwd=str(WORKSPACE),
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+        elif bwrap_available():
             p = subprocess.run(
                 _build_bwrap_argv(cmd),
                 capture_output=True,
@@ -434,7 +567,12 @@ def _shell_execute(cmd):
             )
         else:
             p = subprocess.run(
-                cmd, shell=True, cwd=str(WORKSPACE), capture_output=True, text=True, timeout=30
+                cmd,
+                shell=True,
+                cwd=str(WORKSPACE),
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
         out = {
             "ok": p.returncode == 0,
@@ -443,31 +581,70 @@ def _shell_execute(cmd):
             "stderr": p.stderr[-10000:],
             "command": cmd,
         }
-        if bwrap_available():
+        if is_sudo:
+            out["sudo"] = True
+        elif bwrap_available():
             out["sandbox"] = "bwrap"
         return out
     except subprocess.TimeoutExpired:
         return {"ok": False, "error": "Timed out", "command": cmd}
 
 
-def tool_run_shell(command, confirmed=False):
-    """Run shell freehand when sandboxed; else queue until confirmed=True."""
+def tool_run_shell(command, confirmed=False, password=None):
+    """Run shell freehand when sandboxed; sudo always confirms; else queue.
+
+    password: optional sudo password from UI/Telegram confirm only — never logged
+    or written to memory files. Discarded after use.
+    """
     ensure_ws()
+    # Ensure user/ exists so bwrap --ro-bind succeeds.
+    USER_DIR.mkdir(parents=True, exist_ok=True)
     cmd = (command or "").strip()
     if not cmd:
         return {"ok": False, "error": "Empty command"}
-    if BLOCKED.search(cmd) or cmd.startswith("sudo"):
+    if BLOCKED.search(cmd):
         return {"ok": False, "error": "Command blocked for safety"}
-    # Freehand path: bwrap on PATH → execute now (no PENDING_SHELL / needs_confirm).
+    is_sudo = command_is_sudo(cmd)
+    if is_sudo and not allow_sudo():
+        return {"ok": False, "error": "Command blocked for safety"}
+    if shell_would_write_user(cmd):
+        return {
+            "ok": False,
+            "error": "user/ is read-only for the agent (shell write/delete blocked)",
+        }
+    # sudo always needs Confirm (even when bwrap freehand is on).
+    if is_sudo:
+        if not confirmed:
+            PENDING_SHELL.write_text(
+                json.dumps({"command": cmd, "sudo": True}), encoding="utf-8"
+            )
+            return {
+                "ok": False,
+                "needs_confirm": True,
+                "needs_password": True,
+                "sudo": True,
+                "command": cmd,
+                "error": "Waiting for user confirm (sudo password) in the UI",
+            }
+        try:
+            if PENDING_SHELL.exists():
+                PENDING_SHELL.unlink()
+            return _shell_execute(cmd, password=password)
+        finally:
+            password = None
+    # Freehand path: bwrap on PATH → execute now (no PENDING_SHELL).
     if shell_freehand():
         if PENDING_SHELL.exists():
             PENDING_SHELL.unlink()
         return _shell_execute(cmd)
     if not confirmed:
-        PENDING_SHELL.write_text(json.dumps({"command": cmd}), encoding="utf-8")
+        PENDING_SHELL.write_text(
+            json.dumps({"command": cmd, "sudo": False}), encoding="utf-8"
+        )
         return {
             "ok": False,
             "needs_confirm": True,
+            "sudo": False,
             "command": cmd,
             "error": "Waiting for user confirm in the UI",
         }
@@ -476,14 +653,24 @@ def tool_run_shell(command, confirmed=False):
     return _shell_execute(cmd)
 
 
-def confirm_pending_shell():
-    """UI Confirm: run the queued command (and clear the queue)."""
+def confirm_pending_shell(password=None):
+    """UI/Telegram Confirm: run the queued command (clear queue; discard password)."""
     ensure_ws()
     if not PENDING_SHELL.exists():
         return {"ok": False, "error": "Nothing to confirm"}
-    data = json.loads(PENDING_SHELL.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(PENDING_SHELL.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        PENDING_SHELL.unlink()
+        return {"ok": False, "error": "Corrupt pending shell"}
     cmd = data.get("command") or ""
-    return tool_run_shell(cmd, confirmed=True)
+    is_sudo = bool(data.get("sudo")) or command_is_sudo(cmd)
+    try:
+        return tool_run_shell(
+            cmd, confirmed=True, password=password if is_sudo else None
+        )
+    finally:
+        password = None
 
 
 def cancel_pending_shell():
@@ -491,6 +678,50 @@ def cancel_pending_shell():
     if PENDING_SHELL.exists():
         PENDING_SHELL.unlink()
     return {"ok": True, "cancelled": True}
+
+
+def apply_update():
+    """git pull --ff-only in ROOT, then schedule user-service restart.
+
+    No apt. Returns {ok, message, version}. Restart is fire-and-forget so the
+    HTTP response can flush before the process is replaced.
+    """
+    try:
+        p = subprocess.run(
+            ["git", "pull", "--ff-only"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {
+            "ok": False,
+            "message": "git pull failed: %s" % e,
+            "version": app_version(),
+        }
+    if p.returncode != 0:
+        err = ((p.stderr or "") + "\n" + (p.stdout or "")).strip() or "git pull failed"
+        return {"ok": False, "message": err[:2000], "version": app_version()}
+    pull_msg = ((p.stdout or "") + (p.stderr or "")).strip() or "Already up to date."
+    ver = app_version()
+    # Schedule restart of the user systemd unit (no sudo for --user).
+    try:
+        subprocess.Popen(
+            [
+                "bash",
+                "-lc",
+                "sleep 1; systemctl --user restart debian-ai-agent",
+            ],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        msg = "Updated. Restarting service…\n%s" % pull_msg
+    except OSError as e:
+        msg = "Pulled OK but could not schedule restart: %s\n%s" % (e, pull_msg)
+    return {"ok": True, "message": msg[:2000], "version": ver}
+
 
 
 # ---------------------------------------------------------------------------
@@ -802,7 +1033,7 @@ TOOL_DECLS = [
     },
     {
         "name": "run_shell",
-        "description": "Run a shell command (cwd=workspace). Sandboxed freehand when bubblewrap is available; otherwise user must Confirm in UI / YES-NO on Telegram.",
+        "description": "Run a shell command (cwd=workspace). Sandboxed freehand when bubblewrap is available; sudo always needs Confirm; otherwise Confirm in UI / YES-NO on Telegram. Prefer workspace/ for new work; user/ is read-only.",
         "parameters": {
             "type": "object",
             "properties": {"command": {"type": "string"}},

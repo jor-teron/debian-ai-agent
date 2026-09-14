@@ -153,6 +153,14 @@ fetch_repo() {
   fi
 }
 
+ensure_workspace_dirs() {
+  # Default AI workspace (~/ai-workspace) + standard subdirs.
+  # Expand ~ via $HOME. Safe to re-run (mkdir -p).
+  WS="${HOME}/ai-workspace"
+  mkdir -p "$WS/memory" "$WS/workspace" "$WS/test" "$WS/trash" "$WS/user"
+  say "Workspace: $WS"
+}
+
 setup_env_and_service() {
   cd "$INSTALL_DIR" || exit 1
   if [ ! -f .env ]; then
@@ -160,6 +168,7 @@ setup_env_and_service() {
     say "Created .env — add an API key next."
   fi
   chmod +x run.sh enable-boot.sh install.sh 2>/dev/null || true
+  ensure_workspace_dirs
   if need_cmd systemctl; then
     ./enable-boot.sh >/dev/null
     say "Service: started"

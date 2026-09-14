@@ -34,7 +34,8 @@ def app_version():
 
 
 
-# User secrets and overrides (API keys, HOST, PORT, WORKSPACE, PROVIDER).
+# User secrets and overrides (API keys, HOST, PORT, WORKSPACE, PROVIDER,
+# ALLOW_SUDO, SHELL_NET).
 ENV_PATH = ROOT / ".env"
 
 
@@ -85,11 +86,15 @@ def _host_port():
 # Workspace files (created on demand when tools write them)
 # ---------------------------------------------------------------------------
 
-# Jail for file/shell tools. User uploads and downloads live here too.
+# Jail for file/shell tools = whole tree (default ~/ai-workspace).
+# Subdirs created by ensure_ws: memory/, workspace/, test/, trash/, user/.
+# Prefer workspace/ for new agent work; user/ is agent read-only.
 WORKSPACE = _workspace_path()
+# Agent must not write/delete under this folder (list/read OK).
+USER_DIR = WORKSPACE / "user"
 # Legacy single-file memory (migrated once into memory/date/YYYY_MM.md).
 MEMORY_FILE = WORKSPACE / "memory.md"
-# Split memory tree under workspace/memory/.
+# Split memory tree under workspace/memory/ (unchanged layout).
 MEMORY_DIR = WORKSPACE / "memory"
 MEMORY_SESSION = MEMORY_DIR / "session.md"
 MEMORY_USER = MEMORY_DIR / "user.md"
@@ -97,6 +102,7 @@ MEMORY_ASSISTANT = MEMORY_DIR / "assistant.md"
 MEMORY_DATE_DIR = MEMORY_DIR / "date"
 MEMORY_TOPIC_DIR = MEMORY_DIR / "topic"
 # JSON blob for a shell command waiting for the UI Confirm button.
+# Shape: {"command": "...", "sudo": true|false}
 PENDING_SHELL = WORKSPACE / ".pending_shell.json"
 # Reminder list (id, text, due, notified).
 REMINDERS_FILE = WORKSPACE / "reminders.json"
@@ -244,15 +250,22 @@ BLOCKED = re.compile(
 # Short system prompt. tools.build_system injects memory/ files (user, assistant,
 # current month date log, session). Memory layout: memory/session.md, user.md,
 # assistant.md, date/YYYY_MM.md, topic/*.md.
+# Folders under the jail (WORKSPACE): memory/, workspace/, test/, trash/, user/.
 SYSTEM_BASE = (
     "Helpful agent on the user's Linux PC. "
+    "Agent jail (whole tree): %s. "
+    "Prefer workspace/ for new files and projects. "
+    "user/ is read-only for the agent (list/read OK; no write/delete). "
+    "Also: memory/, test/, trash/. "
     "Tools: files, memory, run_shell, web_search, reminders, jobs (workspace only). "
     "Memory: session.md (short), user.md (facts), assistant.md (extras), "
     "date/YYYY_MM.md + topic/*.md (logs). "
+    "Shell has network by default; SHELL_NET=0 disables net inside bwrap. "
+    "sudo (if ALLOW_SUDO) always needs Confirm / Telegram YES [password]. "
     "If run_shell needs confirm, say what you'll run and wait (UI or Telegram YES/NO); "
     "if it ran already, just report the result. "
     "Short answers. Name files the user can download."
-)
+) % (WORKSPACE,)
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +426,27 @@ def ensure_memory_dirs():
     MEMORY_TOPIC_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def allow_sudo():
+    """True unless ALLOW_SUDO is 0/false/no/off (default: enabled)."""
+    raw = (_env_get("ALLOW_SUDO") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def shell_net_env_off():
+    """True when SHELL_NET=0/false/no/off (opt out of shell network under bwrap).
+
+    Default is network ON. Unset or SHELL_NET=1/true/yes → keep host net.
+    """
+    raw = (_env_get("SHELL_NET") or "1").strip().lower()
+    return raw in ("0", "false", "no", "off")
+
+
 def ensure_ws():
-    """Create the workspace folder and memory tree if they do not exist yet."""
+    """Create WORKSPACE and standard subdirs (memory/workspace/test/trash/user).
+
+    Does not delete existing content (upgrade-safe). Memory tree stays intact.
+    """
     WORKSPACE.mkdir(parents=True, exist_ok=True)
+    for name in ("memory", "workspace", "test", "trash", "user"):
+        (WORKSPACE / name).mkdir(parents=True, exist_ok=True)
     ensure_memory_dirs()

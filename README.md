@@ -1,6 +1,6 @@
 # AI Agent
 
-Version: see `VERSION` (semver + change #, e.g. `0.1.26 (26)`).
+Version: see `VERSION` (semver + change #, e.g. `0.1.28 (28)`).
 
 Tiny browser chat agent (Gemini / ChatGPT / Grok / Claude / DeepSeek / OpenRouter / DeepInfra).  
 Works on **most Linux distros**.
@@ -37,7 +37,7 @@ Open http://127.0.0.1:9191
 
 (`install.sh` is also in the repo if you prefer `git clone` then `./install.sh`.)
 
-To **update** later, run the same install one-liner again (or `./install.sh` inside the folder). Your `.env` is kept.
+To **update** later: use the **Update** button in the UI, or run the install one-liner / `./install.sh` again. Your `.env` is kept.
 
 ## API keys
 
@@ -62,15 +62,16 @@ Chat from your phone (PC stays on; browser not needed).
 3. Message your bot once — it replies with your **chat id**.
 4. Put that id in `.env` as `TELEGRAM_ALLOWED_CHAT_ID=…` and restart again.
 
-Only your chat works. If it asks to run a command, reply **YES** or **NO**.
+Only your chat works. If it asks to run a command, reply **YES** or **NO** (any case). For sudo: **YES yourpassword** (or **Y yourpassword**).
 
 ## Notes
 
 - Browser: default `127.0.0.1:9191`. For LAN, set `HOST=0.0.0.0` in `.env` and open `http://PC-LAN-IP:9191`. Telegram still optional for away-from-home.  
 - Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`, `telegram.py`; `run.py` starts it.  
 - Keys only in `.env` (never commit).  
-- Files/tools: `/home/$USER/ai-workspace`
+- Files/tools jail: `/home/$USER/ai-workspace` with `memory/`, `workspace/`, `test/`, `trash/`, `user/` (prefer `workspace/` for new work; `user/` is agent read-only)  
 - Memory: `ai-workspace/memory/` (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topic/*.md`); legacy `memory.md` migrates once  
-- Shell: with `bwrap` installed, commands run freehand inside a bubblewrap sandbox (workspace RW, host tools RO). Without bubblewrap, Confirm in the UI (or YES/NO on Telegram) is still required.  
+- Shell: with `bwrap`, freehand inside sandbox (network ON by default; `SHELL_NET=0` to disable). Without bwrap, Confirm / Telegram YES-NO. `sudo` always Confirm (`ALLOW_SUDO=1` default).  
+- UI: light theme default (toggle for dark); **Update** button pulls git and restarts the user service.  
 - Stop: `systemctl --user stop debian-ai-agent`  
 - Manual run: `./run.sh`
