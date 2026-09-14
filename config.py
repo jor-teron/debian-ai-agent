@@ -1,12 +1,13 @@
 """
-Config, env, paths, providers, and constants (stdlib only).
+Config, env, paths, and constants (stdlib only).
 
-Single place for workspace location, listen address, API provider catalog,
-and the system prompt. Other modules import names from here — nothing
-imports this file for side effects except the path constants.
+Single place for workspace location, listen address, system prompt, and
+.env helpers. Provider catalogs live in providers.py; this module
+re-exports the names brain/server/tools already import so nothing breaks.
 
-Imports from: stdlib only (os, re, pathlib, datetime).
-Used by: tools.py, brain.py, server.py, run.py, telegram.py.
+Imports from: stdlib (os, re, pathlib, datetime); providers.py (catalog).
+Used by: tools.py, brain.py, server.py, run.py, telegram.py, providers.py
+         (lazy load_env only).
 """
 import os
 import re
@@ -129,94 +130,44 @@ def memory_topic_path(name):
 
 
 # ---------------------------------------------------------------------------
-# Provider catalog (UI model picker + brain.py dispatch)
+# Provider catalog — owned by providers.py; re-export for existing imports
 # ---------------------------------------------------------------------------
 
-# Gemini REST root. The API key is passed as a query parameter.
-GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-
-# Each provider: display label, env var for the key, API "kind"
-# (gemini / openai / anthropic), one models list, and a default model.
-# kind "openai" means Chat Completions (OpenAI, xAI, DeepSeek, OpenRouter, DeepInfra).
-# No free/paid split in the UI — almost all keys are paid except Gemini.
-PROVIDERS = {
-    "gemini": {
-        "label": "Gemini",
-        "env_key": "GEMINI_API_KEY",
-        "kind": "gemini",
-        "models": [
-            "gemini-3.5-flash-lite",
-            "gemini-3.5-flash",
-            "gemini-3.6-flash",
-            "gemini-3.6-pro",
-            "gemini-3.5-pro",
-            "gemini-2.5-pro",
-        ],
-        "default": "gemini-3.5-flash-lite",
-    },
-    "openai": {
-        "label": "OpenAI (ChatGPT)",
-        "env_key": "OPENAI_API_KEY",
-        "kind": "openai",
-        "base": "https://api.openai.com/v1",
-        "models": ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o", "gpt-4.1"],
-        "default": "gpt-4o-mini",
-    },
-    "xai": {
-        "label": "xAI (Grok)",
-        "env_key": "XAI_API_KEY",
-        "kind": "openai",
-        "base": "https://api.x.ai/v1",
-        "models": ["grok-4.3", "grok-3-mini", "grok-4.6", "grok-4.5"],
-        "default": "grok-4.3",
-    },
-    "anthropic": {
-        "label": "Anthropic (Claude)",
-        "env_key": "ANTHROPIC_API_KEY",
-        "kind": "anthropic",
-        "base": "https://api.anthropic.com/v1",
-        "models": ["claude-haiku-4-5", "claude-sonnet-5", "claude-sonnet-4-6"],
-        "default": "claude-haiku-4-5",
-    },
-    "deepseek": {
-        "label": "DeepSeek",
-        "env_key": "DEEPSEEK_API_KEY",
-        "kind": "openai",
-        "base": "https://api.deepseek.com/v1",
-        "models": ["deepseek-chat", "deepseek-reasoner"],
-        "default": "deepseek-chat",
-    },
-    "openrouter": {
-        "label": "OpenRouter",
-        "env_key": "OPENROUTER_API_KEY",
-        "kind": "openai",
-        "base": "https://openrouter.ai/api/v1",
-        "models": [
-            "openrouter/auto",
-            "openai/gpt-4o-mini",
-            "google/gemini-2.0-flash-001",
-            "meta-llama/llama-3.3-70b-instruct",
-        ],
-        "default": "openrouter/auto",
-    },
-    "deepinfra": {
-        "label": "DeepInfra",
-        "env_key": "DEEPINFRA_API_KEY",
-        "kind": "openai",
-        "base": "https://api.deepinfra.com/v1/openai",
-        "models": [
-            "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "meta-llama/Meta-Llama-3.1-70B-Instruct",
-            "google/gemma-2-9b-it",
-            "mistralai/Mistral-7B-Instruct-v0.3",
-        ],
-        "default": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-    },
-}
+# catalogs, defaults, key/status helpers, blink period, local base URLs
+from providers import (  # noqa: E402
+    DEFAULT_PROVIDER,
+    DEFAULT_LLAMACPP_BASE_URL,
+    DEFAULT_OLLAMA_BASE_URL,
+    GEMINI_API_BASE,
+    PROVIDERS,
+    allowed,
+    catalog_for_api,
+    default_mode,
+    default_model,
+    default_provider,
+    get_provider_meta,
+    keys_status,
+    list_modes,
+    list_models,
+    list_providers,
+    llamacpp_base_url,
+    ollama_base_url,
+    provider_key,
+    provider_openai_base,
+    provider_ready,
+    readiness_status,
+    status_blink_ms,
+)
 
 
-# Fallback if PROVIDER in .env is missing or not in PROVIDERS.
-DEFAULT_PROVIDER = "gemini"
+# ---------------------------------------------------------------------------
+# Status LED / offline runtime env (also documented in .env.example)
+# ---------------------------------------------------------------------------
+
+
+def status_blink_ms_config():
+    """Alias kept for clarity — STATUS_BLINK_MS from .env (default 2000)."""
+    return status_blink_ms()
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +220,7 @@ SYSTEM_BASE = (
 
 
 # ---------------------------------------------------------------------------
-# Env helpers and provider defaults
+# Env helpers (provider defaults live in providers.py; re-exported above)
 # ---------------------------------------------------------------------------
 
 
@@ -281,47 +232,6 @@ def load_env():
 def _env_get(name):
     """One env value: .env first, then the process environment, else empty."""
     return (load_env().get(name) or os.environ.get(name) or "").strip()
-
-
-def provider_key(provider):
-    """API key for a provider id (gemini, openai, …), or empty if unset."""
-    meta = PROVIDERS.get(provider) or {}
-    ek = meta.get("env_key") or ""
-    return _env_get(ek) if ek else ""
-
-
-def keys_status():
-    """Map of provider id → True if that key is set (for /api/health)."""
-    return {pid: bool(provider_key(pid)) for pid in PROVIDERS}
-
-
-def default_provider():
-    """PROVIDER from .env if valid, otherwise DEFAULT_PROVIDER."""
-    p = (_env_get("PROVIDER") or DEFAULT_PROVIDER).lower()
-    return p if p in PROVIDERS else DEFAULT_PROVIDER
-
-
-def default_model(provider=None):
-    """Default model for a provider (optional GEMINI_MODEL / OPENAI_MODEL / …)."""
-    provider = provider or default_provider()
-    meta = PROVIDERS[provider]
-    # Optional per-provider model env: GEMINI_MODEL, OPENAI_MODEL, etc.
-    env_name = meta["env_key"].replace("_API_KEY", "_MODEL")
-    m = _env_get(env_name) or meta["default"]
-    return allowed(provider, m)
-
-
-def allowed(provider, model):
-    """Return model if it is in that provider's models list; else the default."""
-    meta = PROVIDERS.get(provider)
-    if not meta:
-        provider = default_provider()
-        meta = PROVIDERS[provider]
-    all_m = set(meta.get("models") or [])
-    if model and model in all_m:
-        return model
-    d = meta["default"]
-    return d if d in all_m else (meta["models"][0] if meta.get("models") else d)
 
 
 # ---------------------------------------------------------------------------

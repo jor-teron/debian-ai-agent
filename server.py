@@ -1,7 +1,8 @@
 """
 HTTP UI and API handler (stdlib http.server).
 
-Serves the chat page from ui.py and the JSON routes the browser calls.
+Serves the chat page from ui.py and the JSON routes the browser calls
+(including online/offline provider catalog and status LED readiness).
 Does not talk to LLM APIs itself — that is brain.run_chat.
 
 Imports from: config.py (settings, keys), tools.py (upload/download/confirm),
@@ -19,13 +20,15 @@ from config import (
     HOST,
     PENDING_SHELL,
     PORT,
-    PROVIDERS,
     WORKSPACE,
     allow_sudo,
     app_version,
-    default_model,
+    catalog_for_api,
     default_provider,
     keys_status,
+    provider_ready,
+    readiness_status,
+    status_blink_ms,
 )
 from tools import (
     apply_update,
@@ -76,16 +79,27 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, HTML.encode("utf-8"), "text/html; charset=utf-8")
             return
         if path == "/api/health":
-            # Keys, version, workspace, due reminders (UI status + banner)
+            # Keys, readiness, version, workspace, due reminders (UI LED + banner)
             rem = tool_reminder_list()
             due = rem.get("due") or []
             keys = keys_status()
+            # Optional ?provider=&model= so the LED can reflect the UI selection.
+            qs = parse_qs(urlparse(self.path).query)
+            sel_p = (qs.get("provider") or [""])[0].strip() or None
+            sel_m = (qs.get("model") or [""])[0].strip() or None
+            ready_blob = readiness_status(sel_p, sel_m)
+            selected = ready_blob.get("selected")
+            if selected is None and sel_p:
+                selected = provider_ready(sel_p, sel_m)
             self._json(
                 200,
                 {
                     "ok": True,
                     "keys": keys,
                     "api_key_set": any(keys.values()),
+                    "providers_ready": ready_blob.get("providers_ready") or {},
+                    "selected": selected,
+                    "status_blink_ms": status_blink_ms(),
                     "workspace": str(WORKSPACE),
                     "pending_shell": PENDING_SHELL.exists(),
                     "version": app_version(),
@@ -103,23 +117,8 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/models":
-            # Provider catalog for the Provider / Model dropdowns (no free/paid split)
-            providers = {
-                pid: {
-                    "label": meta.get("label") or pid,
-                    "models": list(meta.get("models") or []),
-                }
-                for pid, meta in PROVIDERS.items()
-            }
-            dp = default_provider()
-            self._json(
-                200,
-                {
-                    "providers": providers,
-                    "default_provider": dp,
-                    "default_model": default_model(dp),
-                },
-            )
+            # Modes + providers + models for Mode / Provider / Model dropdowns
+            self._json(200, catalog_for_api())
             return
         if path == "/api/reminders":
             # Same list the model sees (due + upcoming)

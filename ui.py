@@ -4,6 +4,10 @@ Browser chat page (light default, dark available; sticky confirm; Enter=send).
 This module holds the single HTML/CSS/JS page the user sees in the browser.
 The page talks to the JSON APIs on server.py (/api/chat, /api/health, …).
 
+Header: Mode (Online|Offline) → Provider → Model; status LED (green solid /
+red blink) beside a short status string. Composer row aligns textarea, file
+upload, and Send to the same height.
+
 Imports from: nothing (string constant only).
 Used by: server.py (GET / and /index.html serve HTML).
 """
@@ -12,10 +16,11 @@ Used by: server.py (GET / and /index.html serve HTML).
 # Page markup
 # ---------------------------------------------------------------------------
 
-# Full chat page: header (status, provider, model, update, theme), message log,
-# sticky confirm dock (optional sudo password), and the composer.
+# Full chat page: header (status LED, mode, provider, model, update, theme),
+# message log, sticky confirm dock (optional sudo password), and the composer.
 # Light is the default theme (localStorage theme=light|dark). Enter sends;
 # Shift+Enter is a new line. Confirm/Cancel appear when a shell command is pending.
+# Mode/Provider/Model persist in localStorage (mode, p, m:<provider>).
 HTML = r"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -56,7 +61,13 @@ select,button,textarea,input[type=file],input[type=password]{font:inherit;border
 select{padding:6px 8px}
 #btnUpdate{padding:6px 10px;font-size:.8rem;background:var(--panel);color:var(--text);border:1px solid var(--border);font-weight:600;cursor:pointer}
 #btnUpdate:hover{border-color:var(--accent)}
-#status{font-size:.8rem;color:var(--muted);max-width:360px;margin-right:4px}
+/* ---- Status LED + short text ---- */
+#statusWrap{display:flex;align-items:center;gap:6px;margin-right:4px;max-width:280px}
+#led{width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:var(--muted);box-shadow:0 0 0 1px rgba(0,0,0,.12)}
+#led.ok{background:var(--ok);animation:none}
+#led.bad{background:var(--bad);animation:led-blink var(--blink,2000ms) step-end infinite}
+@keyframes led-blink{0%,100%{opacity:1}50%{opacity:.15}}
+#status{font-size:.8rem;color:var(--muted);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #status.ok{color:var(--ok)}#status.bad{color:var(--bad)}
 #note{flex:0 0 auto;font-size:.75rem;color:var(--warn);padding:0 16px;min-height:0}
 #log{flex:1 1 auto;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;min-height:0}
@@ -75,9 +86,13 @@ select{padding:6px 8px}
 #sudoPassWrap.show{display:flex}
 #sudoPass{padding:6px 8px;min-width:140px}
 #confirm .ok{background:var(--ok);color:#041018}#confirm .no{background:var(--bad);color:#041018}
-form{display:flex;gap:8px;padding:12px;flex-wrap:wrap;align-items:end}
-textarea{flex:1;min-height:44px;padding:8px;min-width:160px;resize:vertical;max-height:160px}
-button{padding:10px 14px;background:var(--accent);border:none;color:var(--accent-fg);font-weight:600;cursor:pointer}
+/* Composer: match heights of textarea, upload block, Send (~44px) */
+form#f{display:flex;gap:8px;padding:12px;flex-wrap:wrap;align-items:center}
+#f textarea{flex:1;min-height:44px;height:44px;padding:8px 10px;min-width:160px;resize:vertical;max-height:160px;line-height:1.3}
+#f .up{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:44px;height:44px}
+#f .up label{font-size:.7rem;line-height:1;margin:0}
+#f .up input[type=file]{font-size:.75rem;padding:4px 6px;height:28px;max-width:180px}
+#f #send{height:44px;min-height:44px;padding:0 16px;display:inline-flex;align-items:center;justify-content:center;background:var(--accent);border:none;color:var(--accent-fg);font-weight:600;cursor:pointer}
 button:disabled{opacity:.5}
 .up{font-size:.75rem}
 </style></head><body>
@@ -86,7 +101,13 @@ button:disabled{opacity:.5}
     <button type="button" id="themeBtn" title="Toggle light/dark theme" aria-label="Toggle theme">◐</button>
   </h1>
   <div class="controls">
-    <div id="status">…</div>
+    <div id="statusWrap" title="Provider readiness">
+      <span id="led" aria-hidden="true"></span>
+      <div id="status">…</div>
+    </div>
+    <div class="field"><label for="mode">Mode</label>
+      <select id="mode"></select>
+    </div>
     <div class="field"><label for="provider">Provider</label>
       <select id="provider"></select>
     </div>
@@ -116,14 +137,18 @@ button:disabled{opacity:.5}
 </div>
 <script>
 const log=document.getElementById('log'),provider=document.getElementById('provider');
-const model=document.getElementById('model');
-const status=document.getElementById('status'),input=document.getElementById('input'),send=document.getElementById('send');
+const model=document.getElementById('model'),modeSel=document.getElementById('mode');
+const status=document.getElementById('status'),led=document.getElementById('led');
+const input=document.getElementById('input'),send=document.getElementById('send');
 const note=document.getElementById('note'),confirmBar=document.getElementById('confirm'),pendingCmd=document.getElementById('pendingCmd');
 const fileInput=document.getElementById('file');
 const sudoPassWrap=document.getElementById('sudoPassWrap'),sudoPass=document.getElementById('sudoPass');
 const themeBtn=document.getElementById('themeBtn');
-let catalog={providers:{},default_provider:'gemini',default_model:'gemini-3.5-flash-lite'}, history=[], keys={};
+/* catalog from /api/models: modes, providers[{label,mode,needs_key,models[{id,label}]}], defaults */
+let catalog={modes:[],providers:{},default_provider:'gemini',default_model:'gemini-3.5-flash-lite',default_mode:'online',status_blink_ms:2000};
+let history=[], keys={}, providersReady={};
 let pendingIsSudo=false;
+let selectedReady=null; // last /api/health selected readiness
 
 function applyTheme(t){
   const theme=(t==='dark')?'dark':'light';
@@ -143,44 +168,118 @@ themeBtn.onclick=()=>{
   applyTheme(cur==='dark'?'light':'dark');
 };
 
+/** Apply blink period from config (STATUS_BLINK_MS); green never blinks. */
+function applyBlinkMs(ms){
+  const n=Number(ms); const v=(n&&n>=200)?n:2000;
+  document.documentElement.style.setProperty('--blink', v+'ms');
+  catalog.status_blink_ms=v;
+}
+
+/** Providers visible for the current Mode selection. */
+function providersForMode(){
+  const m=(modeSel.value||'online');
+  const out={};
+  Object.keys(catalog.providers||{}).forEach(pid=>{
+    const meta=catalog.providers[pid]||{};
+    if((meta.mode||'online')===m) out[pid]=meta;
+  });
+  return out;
+}
+
+function fillModes(){
+  modeSel.innerHTML='';
+  const modes=(catalog.modes&&catalog.modes.length)?catalog.modes:[
+    {id:'online',label:'Online'},{id:'offline',label:'Offline'}
+  ];
+  modes.forEach(mo=>{
+    const o=document.createElement('option');
+    o.value=mo.id; o.textContent=mo.label||mo.id;
+    modeSel.appendChild(o);
+  });
+  const sm=localStorage.getItem('mode');
+  if(sm && [...modeSel.options].some(o=>o.value===sm)) modeSel.value=sm;
+  else if(catalog.default_mode) modeSel.value=catalog.default_mode;
+  else modeSel.value='online';
+}
+
 function fillProviders(){
   provider.innerHTML='';
-  Object.keys(catalog.providers||{}).forEach(pid=>{
+  const filtered=providersForMode();
+  Object.keys(filtered).forEach(pid=>{
     const o=document.createElement('option'); o.value=pid;
-    const meta=catalog.providers[pid]||{};
+    const meta=filtered[pid]||{};
     o.textContent=meta.label||pid;
     provider.appendChild(o);
   });
   const sp=localStorage.getItem('p');
-  if(sp && catalog.providers[sp]) provider.value=sp;
-  else if(catalog.default_provider && catalog.providers[catalog.default_provider]) provider.value=catalog.default_provider;
+  if(sp && filtered[sp]) provider.value=sp;
+  else if(catalog.default_provider && filtered[catalog.default_provider]) provider.value=catalog.default_provider;
+  else if(provider.options.length) provider.selectedIndex=0;
 }
+
 function fillModels(){
   const p=catalog.providers[provider.value]||{models:[]};
   const list=p.models||[];
   model.innerHTML='';
-  list.forEach(m=>{const o=document.createElement('option');o.value=m;o.textContent=m;model.appendChild(o);});
+  list.forEach(entry=>{
+    const id=(typeof entry==='string')?entry:(entry.id||entry.label||'');
+    const label=(typeof entry==='string')?entry:(entry.label||entry.id||id);
+    if(!id) return;
+    const o=document.createElement('option'); o.value=id; o.textContent=label;
+    model.appendChild(o);
+  });
+  const ids=list.map(e=>(typeof e==='string')?e:(e.id||''));
   const key='m:'+provider.value;
   const s=localStorage.getItem(key);
   const def=catalog.default_model;
-  if(s&&list.includes(s)) model.value=s;
-  else if(provider.value===catalog.default_provider && list.includes(def)) model.value=def;
-  else if(list[0]) model.value=list[0];
+  const pdef=(catalog.providers[provider.value]||{}).default;
+  if(s&&ids.includes(s)) model.value=s;
+  else if(provider.value===catalog.default_provider && ids.includes(def)) model.value=def;
+  else if(pdef&&ids.includes(pdef)) model.value=pdef;
+  else if(ids[0]) model.value=ids[0];
 }
+
+/** Short status + LED: green solid OK; red blink on error/missing. */
 function updateStatus(){
   const pid=provider.value;
-  const has=!!keys[pid];
-  const label=(catalog.providers[pid]&&catalog.providers[pid].label)||pid;
+  const meta=(catalog.providers[pid])||{};
+  const label=meta.label||pid;
   const verEl=document.getElementById('ver');
   if(verEl) verEl.textContent='v'+(window._ver||'?');
-  if(has){
-    status.textContent='Ready · '+label;
-    status.className='ok';
-  }else{
-    status.textContent='No key for '+label;
-    status.className='bad';
+  applyBlinkMs(catalog.status_blink_ms);
+
+  let ok=false;
+  let text='…';
+  const mode=meta.mode||modeSel.value||'online';
+  if(selectedReady && selectedReady.label){
+    ok=!!selectedReady.ready;
+    if(ok) text='OK · '+label;
+    else {
+      const reason=selectedReady.reason||'not ready';
+      if(reason==='missing API key') text='No key · '+label;
+      else if(reason==='runtime unreachable') text='Offline · '+label;
+      else if(reason==='model not installed') text='No model · '+label;
+      else text='Err · '+label;
+    }
+  } else if(mode==='online'){
+    ok=!!keys[pid];
+    text=ok?('OK · '+label):('No key · '+label);
+  } else {
+    // Offline without selected blob yet — use providers_ready map if present
+    ok=!!(providersReady&&providersReady[pid]);
+    text=ok?('OK · '+label):('Offline · '+label);
   }
+  status.textContent=text;
+  status.className=ok?'ok':'bad';
+  led.className=ok?'ok':'bad';
+  led.title=ok?'Ready':'Not ready';
+  statusWrapTitle(ok,label);
 }
+function statusWrapTitle(ok,label){
+  const w=document.getElementById('statusWrap');
+  if(w) w.title=ok?('Ready: '+label):('Not ready: '+label);
+}
+
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function add(role,text,tools){const d=document.createElement('div'); d.className='msg '+(role==='user'?'user':'bot'); d.textContent=text;
   if(tools&&tools.length){const x=document.createElement('details'); x.className='tools'; x.innerHTML='<summary>'+tools.length+' tool(s)</summary><pre>'+esc(JSON.stringify(tools,null,2))+'</pre>'; d.appendChild(x);
@@ -211,25 +310,62 @@ async function refreshPending(){
     }
   }catch(e){}
 }
+/** Health poll with current provider/model so LED matches selection. */
+async function fetchHealth(){
+  const q='?provider='+encodeURIComponent(provider.value||'')+'&model='+encodeURIComponent(model.value||'');
+  const h=await fetch('/api/health'+q).then(r=>r.json());
+  keys=h.keys||keys;
+  providersReady=h.providers_ready||providersReady;
+  selectedReady=h.selected||null;
+  if(h.status_blink_ms) applyBlinkMs(h.status_blink_ms);
+  if(h.version) window._ver=h.version;
+  return h;
+}
 async function boot(){
   try{
-    const h=await fetch('/api/health').then(r=>r.json());
-    keys=h.keys||{};
+    const m=await fetch('/api/models').then(r=>r.json());
+    catalog={
+      modes:m.modes||[],
+      providers:m.providers||{},
+      default_provider:m.default_provider||'gemini',
+      default_model:m.default_model||'',
+      default_mode:m.default_mode||'online',
+      status_blink_ms:m.status_blink_ms||2000
+    };
+    applyBlinkMs(catalog.status_blink_ms);
+    fillModes();
+    fillProviders();
+    fillModels();
+    const h=await fetchHealth();
     window._ws=h.workspace||'';
     window._ver=h.version||'?';
     if(h.due_reminders&&h.due_reminders.length){
       note.textContent='Due reminders: '+h.due_reminders.map(r=>r.text).join('; ');
     } else note.textContent='';
-    const m=await fetch('/api/models').then(r=>r.json());
-    catalog={providers:m.providers||{},default_provider:m.default_provider||'gemini',default_model:m.default_model||''};
-    fillProviders();
-    fillModels();
     updateStatus();
     await refreshPending();
-  }catch(e){status.textContent='Cannot reach server'; status.className='bad';}
+  }catch(e){
+    status.textContent='No server';
+    status.className='bad';
+    led.className='bad';
+  }
 }
-provider.onchange=()=>{localStorage.setItem('p',provider.value); fillModels(); updateStatus();};
-model.onchange=()=>localStorage.setItem('m:'+provider.value,model.value);
+modeSel.onchange=()=>{
+  localStorage.setItem('mode',modeSel.value);
+  fillProviders();
+  fillModels();
+  localStorage.setItem('p',provider.value);
+  fetchHealth().then(updateStatus).catch(()=>updateStatus());
+};
+provider.onchange=()=>{
+  localStorage.setItem('p',provider.value);
+  fillModels();
+  fetchHealth().then(updateStatus).catch(()=>updateStatus());
+};
+model.onchange=()=>{
+  localStorage.setItem('m:'+provider.value,model.value);
+  fetchHealth().then(updateStatus).catch(()=>updateStatus());
+};
 
 document.getElementById('btnUpdate').onclick=async()=>{
   if(!confirm('Pull latest from git and restart the agent service?')) return;
@@ -302,16 +438,17 @@ document.getElementById('f').onsubmit=async ev=>{
       if(history.length>20) history=history.slice(-20);
     }
     await refreshPending();
-    const h=await fetch('/api/health').then(r=>r.json());
-    keys=h.keys||keys;
+    await fetchHealth();
     updateStatus();
+    const h=await fetch('/api/health').then(r=>r.json());
     if(h.due_reminders&&h.due_reminders.length) note.textContent='Due reminders: '+h.due_reminders.map(r=>r.text).join('; ');
   }catch(e){add('bot','Network error: '+e);} finally{send.disabled=false; input.focus();}
 };
 boot();
 setInterval(refreshPending, 4000);
-setInterval(async()=>{try{const h=await fetch('/api/health').then(r=>r.json());
-  keys=h.keys||keys; updateStatus();
+setInterval(async()=>{try{
+  const h=await fetchHealth();
+  updateStatus();
   if(h.due_reminders&&h.due_reminders.length) note.textContent='Due reminders: '+h.due_reminders.map(r=>r.text).join('; ');
   else if(note.textContent.startsWith('Due reminders:')) note.textContent='';
 }catch(e){}}, 15000);

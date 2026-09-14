@@ -1,11 +1,12 @@
 """
 LLM providers: Gemini, OpenAI-compat, Anthropic, and chat dispatch.
 
-Talks to the cloud APIs (stdlib urllib only) and runs tool-call loops.
-Provider chat logic lives here — there is no providers.py.
+Talks to cloud APIs and local OpenAI-compatible runtimes (Ollama,
+llama.cpp) via stdlib urllib, and runs tool-call loops. Provider
+catalogs live in providers.py (re-exported through config).
 
-Imports from: config.py (catalog, keys, defaults), tools.py (TOOL_DECLS,
-              tool-schema helpers, dispatch, build_system).
+Imports from: config.py (catalog, keys, defaults, base URLs), tools.py
+              (TOOL_DECLS, tool-schema helpers, dispatch, build_system).
 Used by: server.py (run_chat), tools.py (plain chat for jobs, _http_json
          for web_search).
 """
@@ -19,7 +20,9 @@ from config import (
     allowed,
     default_model,
     default_provider,
+    get_provider_meta,
     provider_key,
+    provider_openai_base,
 )
 from tools import TOOL_DECLS, anthropic_tools, build_system, dispatch, openai_tools
 
@@ -52,11 +55,12 @@ def _plain_chat(prompt, provider=None, model=None):
     if provider not in PROVIDERS:
         provider = DEFAULT_PROVIDER
     model = allowed(provider, model or default_model(provider))
-    key = provider_key(provider)
-    if not key:
-        return {"ok": False, "error": "No API key for %s" % provider, "reply": ""}
-    meta = PROVIDERS[provider]
+    meta = get_provider_meta(provider) or PROVIDERS[provider]
     kind = meta["kind"]
+    needs_key = bool(meta.get("needs_key", True))
+    key = provider_key(provider)
+    if needs_key and not key:
+        return {"ok": False, "error": "No API key for %s" % provider, "reply": ""}
     try:
         if kind == "gemini":
             url = "%s/models/%s:generateContent?key=%s" % (GEMINI_API_BASE, model, key)
@@ -74,7 +78,12 @@ def _plain_chat(prompt, provider=None, model=None):
             reply = "\n".join(texts).strip() or "(No text)"
             return {"ok": True, "reply": reply, "model": model, "provider": provider}
         if kind == "openai":
-            url = meta["base"].rstrip("/") + "/chat/completions"
+            # Cloud base from catalog, or local Ollama/llama.cpp OpenAI path.
+            base = meta.get("base") or provider_openai_base(provider)
+            url = base.rstrip("/") + "/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            # Local runtimes need no real key; send a dummy bearer some servers expect.
+            headers["Authorization"] = "Bearer %s" % (key or "local")
             data = _http_json(
                 url,
                 {
@@ -82,10 +91,7 @@ def _plain_chat(prompt, provider=None, model=None):
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 1024,
                 },
-                {
-                    "Content-Type": "application/json",
-                    "Authorization": "Bearer %s" % key,
-                },
+                headers,
                 timeout=60,
             )
             msg = ((data.get("choices") or [{}])[0].get("message") or {})
@@ -214,13 +220,18 @@ def gemini_chat(message, model, history):
 
 
 def openai_compat_chat(provider, message, model, history):
-    """Chat with an OpenAI-style API, running workspace tools as tool_calls."""
-    meta = PROVIDERS[provider]
+    """Chat with an OpenAI-style API, running workspace tools as tool_calls.
+
+    Used for cloud OpenAI-compat providers and offline Ollama / llama.cpp
+    (local base URL from providers.provider_openai_base; no API key required).
+    """
+    meta = get_provider_meta(provider) or PROVIDERS[provider]
+    needs_key = bool(meta.get("needs_key", True))
     key = provider_key(provider)
-    if not key:
+    if needs_key and not key:
         return {
             "ok": False,
-            "error": "%s missing. Add it to .env." % meta["env_key"],
+            "error": "%s missing. Add it to .env." % (meta.get("env_key") or "API key"),
             "reply": "",
             "tools": [],
             "provider": provider,
@@ -233,10 +244,13 @@ def openai_compat_chat(provider, message, model, history):
         messages.append({"role": role, "content": turn.get("content", "")})
     messages.append({"role": "user", "content": message})
 
-    url = meta["base"].rstrip("/") + "/chat/completions"
+    # Resolved base includes /v1 for local Ollama and llama.cpp servers.
+    base = meta.get("base") or provider_openai_base(provider)
+    url = base.rstrip("/") + "/chat/completions"
     headers = {
         "Content-Type": "application/json",
-        "Authorization": "Bearer %s" % key,
+        # Offline: dummy bearer; online: real key from .env.
+        "Authorization": "Bearer %s" % (key or "local"),
     }
     # OpenRouter asks for these optional attribution headers on free/paid routes.
     if provider == "openrouter":
@@ -429,7 +443,7 @@ def anthropic_chat(message, model, history):
 
 
 def run_chat(message, provider=None, model=None, history=None):
-    """Pick the right chat function from PROVIDERS[id].kind. Called by /api/chat."""
+    """Pick the right chat function from PROVIDERS[id].kind (online + offline)."""
     provider = (provider or default_provider() or DEFAULT_PROVIDER).lower().strip()
     if provider not in PROVIDERS:
         return {
