@@ -135,10 +135,18 @@ def maybe_reset_session():
     return False
 
 
+# Strip a leading date the model may have included so we don't get
+# "- [YYYY-MM-DD] : [YYYY-MM-DD] text" (system always adds the stamp).
+_LEAD_DATE_RE = re.compile(
+    r"^(?:-\s*)?(?:\[(\d{4}-\d{2}-\d{2})\]|(\d{4}-\d{2}-\d{2})\s*:)\s*"
+)
+
+
 def _dated_line(text):
     """Format one memory log line: '- [YYYY-MM-DD] : text'."""
     stamp = datetime.now().strftime("%Y-%m-%d")
     body = (text or "").strip().replace("\n", " ")
+    body = _LEAD_DATE_RE.sub("", body, count=1).strip()
     return "- [%s] : %s\n" % (stamp, body)
 
 

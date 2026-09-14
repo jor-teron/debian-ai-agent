@@ -1,12 +1,13 @@
-Versioning: `0.3.0 (33)` — semver + change # that +1 every release (never resets).
+Versioning: `0.3.1 (34)` — semver + change # that +1 every release (never resets).
 
 - One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 - Bubblewrap optional in install (`INSTALL_BWRAP=0/1` or prompt); install continues if bwrap unavailable
-- Product/repo rename: **linux-ai-agent** (was debian-ai-agent); install dir `~/linux-ai-agent`; unit `linux-ai-agent.service`
 
 # Features
 
 ## Now
+- **Memory date dedupe** — `_dated_line` strips a leading `[YYYY-MM-DD]` / `YYYY-MM-DD:` the model may prepend so log lines keep a single system date
+- Old project-name migrate leftovers removed from README / install (new installs never see them)
 - **Package layout** — `ai_agent/` package (`python3 -m ai_agent`); root keeps install/run scripts, VERSION, `.env.example`, docs. Flat package files + `ai_agent/ui/` for static HTML/CSS/JS
 - **Editable prompts** — `ai_agent/prompt_chat` (short system) + `prompt_tools` (extra when tools on); no giant `SYSTEM_BASE` in config
 - **Token trim** — `TOOLS_DEFAULT=0` (tools schemas omitted by default); UI **Tools** checkbox (localStorage); keyword boost (run/shell/file/…); `HISTORY_TURNS=10`; soft-capped memory injection (~400/section, ~800 total)

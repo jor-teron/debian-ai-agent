@@ -11,7 +11,6 @@ set -e
 
 REPO_URL="https://github.com/jor-teron/linux-ai-agent.git"
 INSTALL_DIR="${HOME}/linux-ai-agent"
-OLD_DIR="${HOME}/debian-ai-agent"
 
 # ---------------------------------------------------------------------------
 # Decorative helpers (no cowsay/figlet)
@@ -78,15 +77,6 @@ pkg_install() {
   esac
 }
 
-migrate_hint() {
-  if [ -d "$OLD_DIR" ] && [ ! -e "$INSTALL_DIR" ]; then
-    say ""
-    say "  ·‿·  Found old install at $OLD_DIR"
-    say "       New home is $INSTALL_DIR — see README migrate notes."
-    say "       (We won't move or delete your data.)"
-    say ""
-  fi
-}
 
 install_required_deps() {
   say "[1/6] Tools — checking python3 + git… (looking around)"
@@ -185,7 +175,6 @@ fetch_repo() {
     say_fail "Folder $INSTALL_DIR exists but isn't this repo. Move it and re-run."
     exit 1
   else
-    migrate_hint
     say "  … downloading"
     git clone --quiet "$REPO_URL" "$INSTALL_DIR"
     say_ok "★  Code is home."

@@ -1,6 +1,6 @@
 # AI Agent (linux-ai-agent)
 
-Version: see `VERSION` (semver + change #, e.g. `0.3.0 (33)`).
+Version: see `VERSION` (semver + change #, e.g. `0.3.1 (34)`).
 
 Tiny browser chat agent for most Linux distros. Cloud providers (Gemini, ChatGPT, Grok, Claude, DeepSeek, OpenRouter, DeepInfra) plus **Online / Local** modes for Ollama or llama.cpp on your machine.
 
@@ -38,16 +38,6 @@ Open http://127.0.0.1:9191
 
 To **update** later: use the **Update** button in the UI, or run the install one-liner / `./install.sh` again. Your `.env` is kept.
 
-## Migrating from ~/debian-ai-agent
-
-If you already have the old folder:
-
-1. Copy or move `~/debian-ai-agent` → `~/linux-ai-agent` (keep your `.env`).
-2. Disable the old user unit: `systemctl --user disable --now debian-ai-agent` (ignore errors if missing).
-3. From the new folder: `./enable-boot.sh` (enables `linux-ai-agent.service`).
-4. Open http://127.0.0.1:9191
-
-`install.sh` will hint if it sees the old path and the new dir is missing; it does not delete data.
 
 ## API keys
 
