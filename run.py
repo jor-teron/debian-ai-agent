@@ -55,7 +55,11 @@ def main():
     print("debian-ai-agent v%s" % app_version())
     print("Workspace: %s" % WORKSPACE)
     print("Default provider: %s" % default_provider())
-    print("Open http://127.0.0.1:%s  (Ctrl+C to stop)" % PORT)
+    if HOST in ("0.0.0.0", "::"):
+        print("Open http://127.0.0.1:%s  (this PC)" % PORT)
+        print("LAN: http://<this-pc-ip>:%s  (same Wi-Fi; allow firewall TCP %s)" % (PORT, PORT))
+    else:
+        print("Open http://%s:%s  (Ctrl+C to stop)" % (HOST, PORT))
     keys = keys_status()
     if not any(keys.values()):
         print("WARNING: no provider API keys set in .env yet")

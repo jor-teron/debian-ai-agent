@@ -28,7 +28,7 @@ Versioning: `0.1.26 (26)` — semver + change # that +1 every release (never res
 - Web search — Gemini Google Search tool (`web_search`); needs `GEMINI_API_KEY` even if chatting via another provider
 - Reminders — `reminders.json`, notify-send, `/api/reminders`
 - Scheduled jobs — `jobs.json` → `jobs_log.md` (uses default `PROVIDER`)
-- Local UI on port **9191** (localhost only)
+- UI on port **9191** (default localhost; set `HOST=0.0.0.0` for LAN)
 - **Telegram optional bridge** — long-poll DMs when `TELEGRAM_BOT_TOKEN` is set; allow-list via `TELEGRAM_ALLOWED_CHAT_ID`; same `run_chat` + YES/NO shell confirm; no webhook
 - `/api/models` — `{ providers: {…}, default_provider, default_model }`
 - `/api/health` — `keys` booleans per provider + `version` + `shell_sandbox` (`bwrap`|`none`) + `shell_freehand`

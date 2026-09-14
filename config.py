@@ -67,13 +67,13 @@ def _workspace_path():
 
 
 def _host_port():
-    """Listen address: always localhost. Port from .env (default 9191).
+    """Listen address and port from .env (defaults: 127.0.0.1:9191).
 
-    LAN / 0.0.0.0 phone access was removed — use optional Telegram for remote chat.
+    Set HOST=0.0.0.0 in .env for LAN access (other devices use http://PC-LAN-IP:9191).
+    Default stays localhost-only for safety.
     """
     env = _read_dotenv()
-    # Local browser UI only (no 0.0.0.0 / LAN exposure).
-    host = "127.0.0.1"
+    host = (env.get("HOST") or os.environ.get("HOST") or "127.0.0.1").strip() or "127.0.0.1"
     try:
         port = int((env.get("PORT") or os.environ.get("PORT") or "9191").strip() or "9191")
     except ValueError:

@@ -66,7 +66,7 @@ Only your chat works. If it asks to run a command, reply **YES** or **NO**.
 
 ## Notes
 
-- Local browser only (`127.0.0.1:9191`). Remote chat via optional Telegram above.  
+- Browser: default `127.0.0.1:9191`. For LAN, set `HOST=0.0.0.0` in `.env` and open `http://PC-LAN-IP:9191`. Telegram still optional for away-from-home.  
 - Code: `config.py`, `tools.py`, `brain.py`, `ui.py`, `server.py`, `telegram.py`; `run.py` starts it.  
 - Keys only in `.env` (never commit).  
 - Files/tools: `/home/$USER/ai-workspace`
