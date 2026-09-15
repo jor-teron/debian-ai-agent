@@ -1,0 +1,1 @@
+Task=Image: turn the user prompt into one generated image. Save under workspace/generated/. Reply with a short caption and the file name. Online: Gemini image / OpenAI Images when keyed. Local: only when an image-capable Ollama model is selected.

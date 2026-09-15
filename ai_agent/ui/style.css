@@ -25,8 +25,11 @@ h1 .ver{font-size:.75rem;font-weight:500;color:var(--muted)}
 /* Bigger header controls — easier to hit (theme, update, selects, LED) */
 #themeBtn{padding:6px 12px;font-size:1.15rem;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:8px;cursor:pointer;line-height:1}
 #themeBtn:hover{color:var(--text)}
-.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.field{display:flex;gap:6px;align-items:center}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+/* Labels above dropdowns, small, center-aligned over the control */
+.field{display:flex;flex-direction:column;align-items:center;gap:2px}
+.field label{font-size:.7rem;color:var(--muted);white-space:nowrap;text-align:center;width:100%;line-height:1.1}
+.field-tools{flex-direction:column;align-items:center}
 label{font-size:.8rem;color:var(--muted);white-space:nowrap}
 select,button,textarea,input[type=file],input[type=password]{font:inherit;border-radius:8px;border:1px solid var(--border);background:var(--input-bg);color:var(--text)}
 select{padding:6px 8px}
@@ -34,7 +37,7 @@ select{padding:6px 8px}
 #btnUpdate{padding:8px 14px;font-size:.9rem;background:var(--panel);color:var(--text);border:1px solid var(--border);font-weight:600;cursor:pointer}
 #btnUpdate:hover{border-color:var(--accent)}
 /* ---- Status LED + short text ---- */
-#statusWrap{display:flex;align-items:center;gap:8px;margin-right:4px;max-width:280px}
+#statusWrap{display:flex;align-items:center;gap:8px;margin-right:4px;max-width:120px;align-self:center}
 #led{width:12px;height:12px;border-radius:50%;flex:0 0 auto;background:var(--muted);box-shadow:0 0 0 1px rgba(0,0,0,.12)}
 #led.ok{background:var(--ok);animation:none}
 #led.bad{background:var(--bad);animation:led-blink var(--blink,2000ms) step-end infinite}

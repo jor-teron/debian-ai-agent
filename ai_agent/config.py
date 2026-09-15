@@ -91,7 +91,7 @@ def _host_port():
 # ---------------------------------------------------------------------------
 
 # Jail for file/shell tools = whole tree (default ~/ai-workspace).
-# Subdirs created by ensure_ws: memory/, workspace/, test/, trash/, user/.
+# Subdirs created by ensure_ws: memory/, workspace/, workspace/generated/, test/, trash/, user/.
 # Prefer workspace/ for new agent work; user/ is agent read-only.
 WORKSPACE = _workspace_path()
 # Agent must not write/delete under this folder (list/read OK).
@@ -532,9 +532,12 @@ def shell_net_env_off():
 def ensure_ws():
     """Create WORKSPACE and standard subdirs (memory/workspace/test/trash/user).
 
+    Also ensures workspace/generated/ for Image/Video task output.
     Does not delete existing content (upgrade-safe). Memory tree stays intact.
     """
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     for name in ("memory", "workspace", "test", "trash", "user"):
         (WORKSPACE / name).mkdir(parents=True, exist_ok=True)
+    # Generated media from Image / Video tasks (Telegram attach + web download).
+    (WORKSPACE / "workspace" / "generated").mkdir(parents=True, exist_ok=True)
     ensure_memory_dirs()

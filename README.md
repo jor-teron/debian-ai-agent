@@ -1,8 +1,10 @@
 # AI Agent (linux-ai-agent)
 
-Version: see `VERSION` (semver + change #, e.g. `0.3.2 (35)`).
+Version: see `VERSION` (semver + change #, e.g. `0.4.0 (36)`).
 
 Tiny browser chat agent for most Linux distros. Cloud providers (Gemini, ChatGPT, Grok, Claude, DeepSeek, OpenRouter, DeepInfra) plus **Online / Local** modes for Ollama or llama.cpp on your machine.
+
+**Tasks:** Chat | Image | Video | Vision (header dropdown). Online and Local stay available for every task.
 
 Install page: https://jor-teron.github.io/linux-ai-agent/
 
@@ -51,7 +53,16 @@ To **update** later: use the **Update** button in the UI, or run the install one
 | openrouter | `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
 | deepinfra | `DEEPINFRA_API_KEY` | https://deepinfra.com/dash/api_keys |
 
-In the page: **Mode (Online / Local) → Provider → Model**. Use the **Tools** checkbox when you want tool schemas (default off to save tokens).
+In the page: **Task → Mode (Online / Local) → Provider → Model**. Use the **Tools** checkbox when you want tool schemas (default off to save tokens). Status LED text is short: **OK** / **No key** / **No model**.
+
+## Tasks
+
+| Task | What it does |
+|------|----------------|
+| **Chat** | Normal chat + tools; file creates can be attached on Telegram |
+| **Image** | Generate image from prompt (Gemini / OpenAI Online; Local when an image model exists) → `workspace/generated/` |
+| **Video** | Generate video when the API supports it (e.g. Gemini Veo); otherwise a clear unsupported message |
+| **Vision** | Upload (or Telegram photo) + prompt → text reply from a vision-capable model |
 
 ## Telegram (optional)
 
@@ -64,16 +75,18 @@ Chat from your phone (PC stays on; browser not needed).
 
 Only your chat works. If it asks to run a command, reply **YES** or **NO** (any case). For sudo: **YES yourpassword** (or **Y yourpassword**).
 
-File download links in Telegram use `PUBLIC_BASE_URL` when set (absolute URL to `/api/download`); otherwise relative. No `sendDocument` in this release — open the link in the phone browser (Tailscale).
+**Media:** write_file / Image / Video results are sent with `sendPhoto` / `sendVideo` / `sendDocument` (multipart, **max 50MB**). No `Download: http…` links are injected into Telegram text. Photos with a caption run **Vision**. Optional: `/image …` and `/video …` prefixes.
+
+`PUBLIC_BASE_URL` is still optional for the **web** UI / LAN download links; Telegram does not depend on it.
 
 ## Notes
 
-- Browser: default `127.0.0.1:9191`. For LAN / Tailscale, set `HOST=0.0.0.0` (localhost on the PC still works) and open `http://PC-IP:9191`. Set `PUBLIC_BASE_URL=http://100.x.y.z:9191` (your Tailscale IP) so Telegram download links are absolute and open on your phone. Telegram still optional for away-from-home.
+- Browser: default `127.0.0.1:9191`. For LAN / Tailscale, set `HOST=0.0.0.0` (localhost on the PC still works) and open `http://PC-IP:9191`. Set `PUBLIC_BASE_URL=http://100.x.y.z:9191` for absolute web download links.
 - Chat history: each turn is appended to `~/ai-workspace/memory/chats/YYYY-MM-DD.md` (`#` user / `##` assistant). Web UI reloads today's file on refresh via `GET /api/chat/history`.
-- Layout: install scripts + docs at repo root; Python package in `ai_agent/` (`python3 -m ai_agent` via `./run.sh`). Edit prompts in `ai_agent/prompt_chat` / `prompt_tools`, UI in `ai_agent/ui/`, model lists in `models_ollama` / `models_llamacpp`, shell blocklist in `shell_blocklist`.
+- Layout: install scripts + docs at repo root; Python package in `ai_agent/` (`python3 -m ai_agent` via `./run.sh`). Edit prompts in `ai_agent/prompt_*`, UI in `ai_agent/ui/`, model lists in `models_ollama` / `models_llamacpp`, shell blocklist in `shell_blocklist`.
 - Token trim: `TOOLS_DEFAULT=0` (tools off unless UI Tools on or message keywords); `HISTORY_TURNS=10`.
 - Keys only in `.env` (never commit).
-- Files/tools jail: `/home/$USER/ai-workspace` with `memory/`, `workspace/`, `test/`, `trash/`, `user/` (prefer `workspace/` for new work; `user/` is agent read-only)
+- Files/tools jail: `/home/$USER/ai-workspace` with `memory/`, `workspace/`, `workspace/generated/`, `test/`, `trash/`, `user/` (prefer `workspace/` for new work; `user/` is agent read-only)
 - Memory: `ai-workspace/memory/` (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topic/*.md`); legacy `memory.md` migrates once
 - Shell: with `bwrap`, freehand inside sandbox (network ON by default; `SHELL_NET=0` to disable). Without bwrap, Confirm / Telegram YES-NO. `sudo` always Confirm (`ALLOW_SUDO=1` default).
 - UI: light theme default (toggle for dark); **Update** button pulls git and restarts the user service.

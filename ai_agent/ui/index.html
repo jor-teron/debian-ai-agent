@@ -15,6 +15,9 @@
       <span id="led" aria-hidden="true"></span>
       <div id="status">…</div>
     </div>
+    <div class="field"><label for="task">Task</label>
+      <select id="task"></select>
+    </div>
     <div class="field"><label for="mode">Mode</label>
       <select id="mode"></select>
     </div>
@@ -24,7 +27,7 @@
     <div class="field"><label for="model">Model</label>
       <select id="model"></select>
     </div>
-    <div class="field" title="Send tool schemas this turn (also auto on keywords)">
+    <div class="field field-tools" title="Send tool schemas this turn (also auto on keywords)">
       <label for="toolsToggle">Tools</label>
       <input type="checkbox" id="toolsToggle"/>
     </div>
@@ -44,8 +47,8 @@
     <button type="button" class="no" id="btnCancel">Cancel</button>
   </div>
   <form id="f">
-    <textarea id="input" placeholder="Ask something…" required></textarea>
-    <div class="up"><label>Upload</label><input type="file" id="file"/></div>
+    <textarea id="input" placeholder="Ask something…"></textarea>
+    <div class="up"><label>Upload</label><input type="file" id="file" accept="*/*"/></div>
     <button id="send">Send</button>
   </form>
 </div>

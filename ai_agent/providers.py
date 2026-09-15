@@ -53,8 +53,14 @@ ONLINE_PROVIDERS: Dict[str, Dict[str, Any]] = {
             "gemini-3.6-pro",
             "gemini-3.5-pro",
             "gemini-2.5-pro",
+            # Image / video task models (also usable when Task=Chat for multimodal)
+            "gemini-2.5-flash-image",
+            "gemini-2.0-flash-preview-image-generation",
+            "veo-2.0-generate-001",
         ],
         "default": "gemini-3.5-flash-lite",
+        # Task capability hints (used by catalog_for_api filter).
+        "tasks": ["chat", "image", "video", "vision"],
     },
     "openai": {
         "label": "OpenAI (ChatGPT)",
@@ -63,8 +69,16 @@ ONLINE_PROVIDERS: Dict[str, Dict[str, Any]] = {
         "env_key": "OPENAI_API_KEY",
         "kind": "openai",
         "base": "https://api.openai.com/v1",
-        "models": ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4o", "gpt-4.1"],
+        "models": [
+            "gpt-4o-mini",
+            "gpt-4.1-mini",
+            "gpt-4o",
+            "gpt-4.1",
+            "dall-e-3",
+            "gpt-image-1",
+        ],
         "default": "gpt-4o-mini",
+        "tasks": ["chat", "image", "vision"],
     },
     "xai": {
         "label": "xAI (Grok)",
@@ -216,6 +230,7 @@ LOCAL_PROVIDERS: Dict[str, Dict[str, Any]] = {
         "models": _OLLAMA_MODELS,
         "default": "llama3.2:3b",
         "tags_note": "Install models with: ollama pull <tag>",
+        "tasks": ["chat", "image", "vision", "video"],
     },
     "llamacpp": {
         "label": "llama.cpp",
@@ -233,6 +248,7 @@ LOCAL_PROVIDERS: Dict[str, Dict[str, Any]] = {
         "models": _LLAMACPP_MODELS,
         "default": "llama-3.2-3b",
         "tags_note": "Load a GGUF in llama-server; curated ids are hints for the UI",
+        "tasks": ["chat", "vision"],
     },
 }
 
@@ -681,23 +697,107 @@ def readiness_status(selected_provider: Optional[str] = None, selected_model: Op
     }
 
 
-def catalog_for_api() -> Dict[str, Any]:
-    """Structured catalog for GET /api/models (modes + providers + models)."""
+
+# ---------------------------------------------------------------------------
+# Task → model filtering (Chat | Image | Video | Vision)
+# ---------------------------------------------------------------------------
+# Online + Local catalogs stay available for every task (UI never grays out
+# Local). When a task is selected we prefer models that look capable; if the
+# filter would empty the list we fall back to the full curated list.
+
+
+TASK_IDS = ("chat", "image", "video", "vision")
+
+
+def _model_matches_task(mid: str, task: str) -> bool:
+    """Heuristic: does this model id look suitable for task?"""
+    m = (mid or "").lower()
+    task = (task or "chat").lower()
+    if task == "chat":
+        # Hide dedicated image/video generators from Chat list when obvious.
+        if any(x in m for x in ("dall-e", "gpt-image", "imagen", "veo-", "-image", "flash-image")):
+            return False
+        return True
+    if task == "image":
+        return any(
+            x in m
+            for x in (
+                "image",
+                "imagen",
+                "dall-e",
+                "gpt-image",
+                "flux",
+                "sdxl",
+                "stable-diffusion",
+            )
+        )
+    if task == "video":
+        return "veo" in m or "video" in m
+    if task == "vision":
+        # Most chat multimodal models work; exclude pure generators.
+        if any(x in m for x in ("dall-e", "gpt-image", "imagen", "veo-", "flux")):
+            return False
+        return True
+    return True
+
+
+def filter_models_for_task(models, task: str):
+    """Filter [{id,label}|str] list for task; fallback to full list if empty."""
+    task = (task or "chat").lower()
+    if task == "chat" or not task:
+        # Still drop pure generators from chat for cleaner UX.
+        filtered = []
+        for entry in models or []:
+            mid = model_id(entry)
+            if _model_matches_task(mid, "chat"):
+                filtered.append(entry)
+        return filtered if filtered else list(models or [])
+    filtered = []
+    for entry in models or []:
+        mid = model_id(entry)
+        if _model_matches_task(mid, task):
+            filtered.append(entry)
+    # Fallback: show full catalog so Local/Online never look empty.
+    return filtered if filtered else list(models or [])
+
+
+def catalog_for_api(task: Optional[str] = None) -> Dict[str, Any]:
+    """Structured catalog for GET /api/models (modes + providers + models).
+
+    Optional task=chat|image|video|vision filters model lists when sensible;
+    Online and Local providers remain listed for every task.
+    """
+    task_l = (task or "").strip().lower() or None
     providers_out: Dict[str, Any] = {}
     for pid, meta in PROVIDERS.items():
+        models = models_for_api(meta)
+        if task_l:
+            models = [
+                {"id": model_id(e), "label": model_label(e)}
+                for e in filter_models_for_task(models, task_l)
+            ]
         providers_out[pid] = {
             "label": meta.get("label") or pid,
             "mode": meta.get("mode") or "online",
             "needs_key": bool(meta.get("needs_key", True)),
-            "models": models_for_api(meta),
+            "models": models,
             "default": meta.get("default") or "",
+            "tasks": meta.get("tasks") or list(TASK_IDS),
         }
     dp = default_provider()
     return {
         "modes": list_modes(),
+        "tasks": [
+            {"id": "chat", "label": "Chat"},
+            {"id": "image", "label": "Image"},
+            {"id": "video", "label": "Video"},
+            {"id": "vision", "label": "Vision"},
+        ],
         "providers": providers_out,
         "default_provider": dp,
         "default_model": default_model(dp),
         "default_mode": default_mode(),
+        "default_task": "chat",
         "status_blink_ms": status_blink_ms(),
+        "task": task_l or "chat",
     }

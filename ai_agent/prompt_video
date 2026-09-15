@@ -1,0 +1,1 @@
+Task=Video: generate a short video from the prompt when the provider supports it (e.g. Gemini Veo). Otherwise explain clearly that video is unsupported for this provider/mode. Save under workspace/generated/ when bytes are returned.

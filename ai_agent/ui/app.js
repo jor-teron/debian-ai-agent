@@ -1,5 +1,6 @@
 const log=document.getElementById('log'),provider=document.getElementById('provider');
 const model=document.getElementById('model'),modeSel=document.getElementById('mode');
+const taskSel=document.getElementById('task');
 const status=document.getElementById('status'),led=document.getElementById('led');
 const input=document.getElementById('input'),send=document.getElementById('send');
 const note=document.getElementById('note'),confirmBar=document.getElementById('confirm'),pendingCmd=document.getElementById('pendingCmd');
@@ -7,8 +8,9 @@ const fileInput=document.getElementById('file');
 const sudoPassWrap=document.getElementById('sudoPassWrap'),sudoPass=document.getElementById('sudoPass');
 const themeBtn=document.getElementById('themeBtn');
 const toolsToggle=document.getElementById('toolsToggle');
-/* catalog from /api/models: modes, providers[{label,mode,needs_key,models[{id,label}]}], defaults */
-let catalog={modes:[],providers:{},default_provider:'gemini',default_model:'gemini-3.5-flash-lite',default_mode:'online',status_blink_ms:2000};
+/* catalog from /api/models: tasks, modes, providers[{label,mode,needs_key,models[{id,label}]}], defaults */
+let catalog={tasks:[],modes:[],providers:{},default_provider:'gemini',default_model:'gemini-3.5-flash-lite',default_mode:'online',default_task:'chat',status_blink_ms:2000};
+let pendingVisionImage=null; // {name,content,encoding,mime} set by file picker for Vision
 let history=[], keys={}, providersReady={};
 let pendingIsSudo=false;
 let selectedReady=null; // last /api/health selected readiness
@@ -93,6 +95,39 @@ function providersForMode(){
   return out;
 }
 
+
+function fillTasks(){
+  taskSel.innerHTML='';
+  const tasks=(catalog.tasks&&catalog.tasks.length)?catalog.tasks:[
+    {id:'chat',label:'Chat'},{id:'image',label:'Image'},
+    {id:'video',label:'Video'},{id:'vision',label:'Vision'}
+  ];
+  // Locked order: Chat | Image | Video | Vision
+  const order=['chat','image','video','vision'];
+  const byId={}; tasks.forEach(t=>{byId[t.id]=t;});
+  order.forEach(id=>{
+    const t=byId[id]||{id:id,label:id.charAt(0).toUpperCase()+id.slice(1)};
+    const o=document.createElement('option');
+    o.value=t.id; o.textContent=t.label||t.id;
+    taskSel.appendChild(o);
+  });
+  let st=localStorage.getItem('task');
+  if(st && [...taskSel.options].some(o=>o.value===st)) taskSel.value=st;
+  else taskSel.value=catalog.default_task||'chat';
+  updateComposerHint();
+}
+
+function updateComposerHint(){
+  const task=taskSel.value||'chat';
+  if(task==='image') input.placeholder='Describe the image to generate…';
+  else if(task==='video') input.placeholder='Describe the video to generate…';
+  else if(task==='vision') input.placeholder='Ask about the uploaded image…';
+  else input.placeholder='Ask something…';
+  // Vision: prefer image accept; others keep general upload for chat files.
+  if(task==='vision') fileInput.setAttribute('accept','image/*');
+  else fileInput.setAttribute('accept','*/*');
+}
+
 function fillModes(){
   modeSel.innerHTML='';
   const modes=(catalog.modes&&catalog.modes.length)?catalog.modes:[
@@ -148,7 +183,7 @@ function fillModels(){
   else if(ids[0]) model.value=ids[0];
 }
 
-/** Short status + LED: green solid OK; red blink on error/missing. */
+/** Short status + LED: OK / No key / No model (no provider/model name in text). */
 function updateStatus(){
   const pid=provider.value;
   const meta=(catalog.providers[pid])||{};
@@ -162,21 +197,21 @@ function updateStatus(){
   const mode=meta.mode||modeSel.value||'online';
   if(selectedReady && selectedReady.label){
     ok=!!selectedReady.ready;
-    if(ok) text='OK · '+label;
+    if(ok) text='OK';
     else {
       const reason=selectedReady.reason||'not ready';
-      if(reason==='missing API key') text='No key · '+label;
-      else if(reason==='runtime unreachable') text='No runtime · '+label;
-      else if(reason==='model not installed') text='No model · '+label;
-      else text='Err · '+label;
+      if(reason==='missing API key') text='No key';
+      else if(reason==='runtime unreachable') text='No model';
+      else if(reason==='model not installed') text='No model';
+      else text=(mode==='online')?'No key':'No model';
     }
   } else if(mode==='online'){
     ok=!!keys[pid];
-    text=ok?('OK · '+label):('No key · '+label);
+    text=ok?'OK':'No key';
   } else {
     // Local without selected blob yet — use providers_ready map if present
     ok=!!(providersReady&&providersReady[pid]);
-    text=ok?('OK · '+label):('No runtime · '+label);
+    text=ok?'OK':'No model';
   }
   status.textContent=text;
   status.className=ok?'ok':'bad';
@@ -254,17 +289,21 @@ async function loadChatHistory(){
 
 async function boot(){
   try{
-    const m=await fetch('/api/models').then(r=>r.json());
+    const savedTask=localStorage.getItem('task')||'chat';
+    const m=await fetch('/api/models?task='+encodeURIComponent(savedTask)).then(r=>r.json());
     catalog={
+      tasks:m.tasks||[],
       modes:m.modes||[],
       providers:m.providers||{},
       default_provider:m.default_provider||'gemini',
       default_model:m.default_model||'',
       default_mode:m.default_mode||'online',
+      default_task:m.default_task||'chat',
       status_blink_ms:m.status_blink_ms||2000
     };
     if(m.ui_light) setUiLight(m.ui_light);
     applyBlinkMs(catalog.status_blink_ms);
+    fillTasks();
     fillModes();
     fillProviders();
     fillModels();
@@ -283,6 +322,25 @@ async function boot(){
     led.className='bad';
   }
 }
+async function reloadCatalogForTask(){
+  const task=taskSel.value||'chat';
+  try{
+    const m=await fetch('/api/models?task='+encodeURIComponent(task)).then(r=>r.json());
+    catalog.providers=m.providers||catalog.providers;
+    catalog.tasks=m.tasks||catalog.tasks;
+    if(m.ui_light) setUiLight(m.ui_light);
+    fillProviders();
+    fillModels();
+  }catch(e){}
+  updateComposerHint();
+}
+
+taskSel.onchange=()=>{
+  localStorage.setItem('task',taskSel.value);
+  pendingVisionImage=null;
+  reloadCatalogForTask().then(()=>fetchHealth().then(updateStatus).catch(()=>updateStatus()));
+};
+
 modeSel.onchange=()=>{
   localStorage.setItem('mode',modeSel.value);
   fillProviders();
@@ -342,6 +400,11 @@ fileInput.onchange=async()=>{
     let b64=''; const chunk=0x8000;
     for(let i=0;i<bytes.length;i+=chunk){b64+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}
     b64=btoa(b64);
+    const task=taskSel.value||'chat';
+    // Vision: keep image in memory for the next Send (also upload to workspace).
+    if(task==='vision' || /^image\//i.test(f.type||'')){
+      pendingVisionImage={name:f.name,content:b64,encoding:'base64',mime:f.type||'image/jpeg'};
+    }
     const isText=/\.(txt|md|py|sh|json|csv|html|css|js|env|log|yml|yaml)$/i.test(f.name)&&f.size<200000;
     let body;
     if(isText){
@@ -351,25 +414,50 @@ fileInput.onchange=async()=>{
       body={name:f.name,content:b64,encoding:'base64'};
     }
     const res=await fetch('/api/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
-    if(res.ok) add('bot','Uploaded '+f.name+' → download: /api/download?name='+encodeURIComponent(f.name)+'  ([[download:'+f.name+']])');
-    else add('bot','Upload failed: '+(res.error||'?'));
+    if(res.ok){
+      if(task==='vision') add('bot','Vision image ready: '+f.name+' (click Send with your question)');
+      else add('bot','Uploaded '+f.name+' → download: /api/download?name='+encodeURIComponent(f.name)+'  ([[download:'+f.name+']])');
+    } else add('bot','Upload failed: '+(res.error||'?'));
   }catch(e){add('bot','Upload error: '+e);} finally{fileInput.value=''; send.disabled=false;}
 };
 input.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();document.getElementById('f').requestSubmit();}
 });
 document.getElementById('f').onsubmit=async ev=>{
-  ev.preventDefault(); const message=input.value.trim(); if(!message) return;
-  add('user',message); input.value=''; send.disabled=true;
+  ev.preventDefault();
+  const task=taskSel.value||'chat';
+  let message=input.value.trim();
+  if(!message && task!=='vision') return;
+  if(!message && task==='vision') message='Describe this image.';
+  if(task==='vision' && !pendingVisionImage){
+    add('bot','Vision needs an image — use Upload first, then Send.');
+    return;
+  }
+  add('user', message+(task!=='chat'?'  ['+task+']':''));
+  input.value=''; send.disabled=true;
   try{
+    const payload={
+      message, provider:provider.value, model:model.value, history,
+      tools:!!toolsToggle.checked, task
+    };
+    if(task==='vision' && pendingVisionImage){
+      payload.image=pendingVisionImage;
+    }
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message,provider:provider.value,model:model.value,history,tools:!!toolsToggle.checked})});
+      body:JSON.stringify(payload)});
     const data=await res.json();
-    if(!data.ok) add('bot', data.error||'Failed', data.tools); else {
+    if(!data.ok) add('bot', data.error||data.reply||'Failed', data.tools); else {
       add('bot', data.reply, data.tools);
+      // Surface generated media download links from media field too.
+      if(data.media && data.media.name){
+        const dl=document.createElement('div'); dl.className='dl';
+        dl.innerHTML='<a href="/api/download?name='+encodeURIComponent(data.media.name)+'" download>'+esc(data.media.name)+'</a>';
+        log.lastChild && log.lastChild.appendChild(dl);
+      }
       history.push({role:'user',content:message},{role:'assistant',content:data.reply});
       if(history.length>20) history=history.slice(-20);
     }
+    if(task==='vision') pendingVisionImage=null;
     await refreshPending();
     await fetchHealth();
     updateStatus();

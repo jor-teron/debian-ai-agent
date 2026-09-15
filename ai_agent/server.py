@@ -2,9 +2,9 @@
 HTTP UI and API handler (stdlib http.server).
 
 Serves the chat page from ai_agent/ui/ (via thin ui.py) and JSON API routes
-(including online/local provider catalog, status LED readiness,
+(online/local catalog, Task chat|image|video|vision, status LED readiness,
 optional UI_LIGHT_* theme overrides, and Markdown chat history).
-Does not talk to LLM APIs itself — that is brain.run_chat.
+Chat/media dispatch goes through tasks.run_task → brain when needed.
 
 Imports from: ai_agent.config, tools, brain, ui (static page loader).
 Used by: run (ThreadingHTTPServer(..., Handler)).
@@ -43,7 +43,7 @@ from ai_agent.tools import (
     tool_write_bytes,
     tool_write_file,
 )
-from ai_agent.brain import run_chat
+from ai_agent.tasks import run_task
 from ai_agent.chat_history import append_exchange, history_for_api
 from ai_agent.ui import load_index, load_static
 
@@ -134,9 +134,11 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         if path == "/api/models":
-            # Modes + providers + models for Mode / Provider / Model dropdowns;
+            # Modes + tasks + providers + models; optional ?task= filters models.
             # ui_light carries optional UI_LIGHT_* .env hex overrides for light theme.
-            blob = catalog_for_api()
+            qs = parse_qs(urlparse(self.path).query)
+            task = (qs.get("task") or [""])[0].strip() or None
+            blob = catalog_for_api(task=task)
             blob["ui_light"] = ui_light_theme()
             self._json(200, blob)
             return
@@ -156,6 +158,16 @@ class Handler(BaseHTTPRequestHandler):
             except PermissionError as e:
                 self._json(403, {"ok": False, "error": str(e)})
                 return
+            if not target.is_file():
+                # Image/Video tasks save under workspace/generated/<basename>.
+                alt = WORKSPACE / "workspace" / "generated" / name
+                try:
+                    alt_res = alt.resolve()
+                    alt_res.relative_to(WORKSPACE.resolve())
+                    if alt_res.is_file():
+                        target = alt_res
+                except (ValueError, OSError):
+                    pass
             if not target.is_file():
                 self._json(404, {"ok": False, "error": "file not found"})
                 return
@@ -239,26 +251,31 @@ class Handler(BaseHTTPRequestHandler):
         if path != "/api/chat":
             self._json(404, {"ok": False, "error": "Not found"})
             return
-        # Chat: message + optional provider/model/history → brain.run_chat
+        # Chat / Image / Video / Vision: message + optional task / image → tasks.run_task
         try:
             data = json.loads(raw.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             self._json(400, {"ok": False, "error": "Invalid JSON"})
             return
+        task = (data.get("task") or "chat").strip().lower() or "chat"
         message = (data.get("message") or "").strip()
-        if not message:
+        # Vision may send only an image + empty message (default prompt inside tasks).
+        if not message and task not in ("vision",):
             self._json(400, {"ok": False, "error": "message required"})
             return
         # Optional tools flag from UI (bool). None → brain resolves default/keywords.
         tools_flag = data.get("tools", None)
         if tools_flag is not None:
             tools_flag = bool(tools_flag)
-        result = run_chat(
-            message,
+        result = run_task(
+            task=task,
+            message=message,
             provider=data.get("provider"),
             model=data.get("model"),
             history=data.get("history") or [],
             use_tools=tools_flag,
+            image=data.get("image"),
+            image_name=(data.get("image_name") or "").strip(),
         )
         # Persist completed exchange to memory/chats/YYYY-MM-DD.md (source of truth).
         # Do this for both ok and error replies so refresh still shows the turn.
@@ -266,7 +283,8 @@ class Handler(BaseHTTPRequestHandler):
         if not reply and not result.get("ok"):
             reply = (result.get("error") or "chat failed").strip()
         try:
-            append_exchange(message, reply or "(No reply)")
+            label = message or ("[%s]" % task)
+            append_exchange(label, reply or "(No reply)")
         except Exception:  # noqa: BLE001
             pass
         self._json(200 if result.get("ok") else 400, result)
