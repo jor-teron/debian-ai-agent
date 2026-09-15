@@ -2,8 +2,8 @@
 Config, env, paths, and constants (stdlib only).
 
 Single place for workspace location, listen address, prompts/blocklist
-loaders, .env helpers, TOOLS_DEFAULT / HISTORY_TURNS, and optional
-UI_LIGHT_* theme overrides. Provider catalogs live in providers.py; this
+loaders, .env helpers, TOOLS_DEFAULT / HISTORY_TURNS, PUBLIC_BASE_URL /
+download_url, and optional UI_LIGHT_* theme overrides. Provider catalogs live in providers.py; this
 module re-exports names brain/server/tools already import.
 
 Imports from: stdlib; ai_agent.providers (catalog).
@@ -13,6 +13,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 
 # ---------------------------------------------------------------------------
 # Project root and version
@@ -72,8 +73,9 @@ def _workspace_path():
 def _host_port():
     """Listen address and port from .env (defaults: 127.0.0.1:9191).
 
-    Set HOST=0.0.0.0 in .env for LAN access (other devices use http://PC-LAN-IP:9191).
-    Default stays localhost-only for safety.
+    Set HOST=0.0.0.0 in .env for LAN / Tailscale access (phone uses Tailscale IP).
+    Localhost on the PC still works with HOST=0.0.0.0. Pair with PUBLIC_BASE_URL
+    so Telegram gets absolute /api/download links. Default stays localhost-only.
     """
     env = _read_dotenv()
     host = (env.get("HOST") or os.environ.get("HOST") or "127.0.0.1").strip() or "127.0.0.1"
@@ -103,6 +105,8 @@ MEMORY_USER = MEMORY_DIR / "user.md"
 MEMORY_ASSISTANT = MEMORY_DIR / "assistant.md"
 MEMORY_DATE_DIR = MEMORY_DIR / "date"
 MEMORY_TOPIC_DIR = MEMORY_DIR / "topic"
+# Chat history Markdown day files (Feature B): memory/chats/YYYY-MM-DD.md
+MEMORY_CHATS_DIR = MEMORY_DIR / "chats"
 # JSON blob for a shell command waiting for the UI Confirm button.
 # Shape: {"command": "...", "sudo": true|false}
 PENDING_SHELL = WORKSPACE / ".pending_shell.json"
@@ -222,11 +226,11 @@ BLOCKED = _load_shell_blocklist()
 # Tiny built-in prompts if prompt_chat / prompt_tools files are missing.
 _FALLBACK_CHAT = (
     "Helpful Linux PC agent. Jail: %s. Prefer workspace/; user/ read-only. "
-    "Short answers. Name downloadable files."
+    "Short answers. Name downloadable files; include download links when files are written."
 )
 _FALLBACK_TOOLS = (
     "Tools: files, memory, run_shell, web_search, reminders, jobs. "
-    "sudo needs Confirm / Telegram YES. Shell net on unless SHELL_NET=0."
+    "sudo needs Confirm / Telegram YES. Shell net on unless SHELL_NET=0. After write_file include download URL."
 )
 
 
@@ -422,6 +426,31 @@ def telegram_model():
     if m:
         return allowed(provider, m)
     return default_model(provider)
+
+
+def public_base_url():
+    """Absolute origin for download links (PUBLIC_BASE_URL), or '' if unset.
+
+    Example Tailscale: http://100.100.50.XXX:9191 — no trailing slash required.
+    Empty → relative /api/download links only (browser same-origin OK).
+    """
+    return _env_get("PUBLIC_BASE_URL").rstrip("/")
+
+
+def download_url(name):
+    """Build a download link for a workspace basename.
+
+    If PUBLIC_BASE_URL is set → {base}/api/download?name={urlencoded}.
+    Else → relative /api/download?name=… (browser / same host).
+    """
+    # Basename only — never put path separators into the query.
+    base_name = Path(str(name or "")).name
+    q = quote(base_name, safe="")
+    rel = "/api/download?name=%s" % q
+    base = public_base_url()
+    if base:
+        return "%s%s" % (base, rel)
+    return rel
 
 
 def ensure_memory_dirs():

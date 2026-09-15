@@ -4,9 +4,11 @@ Optional Telegram DM bridge (long polling, no webhook).
 When TELEGRAM_BOT_TOKEN is set in .env, a background thread polls getUpdates
 and routes private messages through brain.run_chat (same path as the web UI).
 Shell confirm becomes YES/NO (case-insensitive); sudo may be YES <password>.
-Group chats and non-text are ignored.
+Group chats and non-text are ignored. Download links prefer PUBLIC_BASE_URL
+(absolute) so a phone on Tailscale can open them. Chat turns append to
+memory/chats/YYYY-MM-DD.md. No sendDocument in this release.
 
-Imports from: ai_agent.config, brain, tools.
+Imports from: ai_agent.config, brain, chat_history, tools.
 Used by: run (start_telegram_thread). Respects TOOLS_DEFAULT via run_chat.
 """
 import json
@@ -14,17 +16,21 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import unquote
 
 from ai_agent.config import (
     PENDING_SHELL,
     default_model,
     default_provider,
+    download_url,
+    public_base_url,
     telegram_allowed_chat_id,
     telegram_bot_token,
     telegram_model,
     telegram_provider,
 )
 from ai_agent.brain import run_chat
+from ai_agent.chat_history import append_exchange
 from ai_agent.tools import cancel_pending_shell, confirm_pending_shell
 
 
@@ -277,6 +283,64 @@ def _handle_shell_reply(chat_id, text, token=None, message_id=None):
     return True
 
 
+
+# ---------------------------------------------------------------------------
+# Download links (PUBLIC_BASE_URL → absolute for phone / Tailscale)
+# ---------------------------------------------------------------------------
+
+
+def _tool_download_names(tools):
+    """Basenames from write_file / write results in a run_chat tool trace."""
+    names = []
+    seen = set()
+    for t in tools or []:
+        if not isinstance(t, dict):
+            continue
+        r = t.get("result") or {}
+        if not isinstance(r, dict) or not r.get("ok"):
+            continue
+        n = r.get("name")
+        if not n and r.get("path"):
+            n = str(r.get("path")).rstrip("/").split("/")[-1]
+        # Prefer write_file / any result that already carries download=
+        if not n:
+            continue
+        if t.get("name") == "write_file" or r.get("download") or r.get("path"):
+            if n not in seen:
+                seen.add(n)
+                names.append(n)
+    return names
+
+
+def enrich_telegram_text(reply, tools=None):
+    """Prefer absolute /api/download links when PUBLIC_BASE_URL is set.
+
+    - Rewrites relative /api/download?name=… to absolute.
+    - Appends Download: lines for write_file results not already mentioned.
+    When PUBLIC_BASE_URL is empty, leaves relative links alone (no-op enrich).
+    """
+    import re
+
+    text = "" if reply is None else str(reply)
+    names = _tool_download_names(tools)
+    base = public_base_url()
+    if base:
+        def _abs(m):
+            return download_url(unquote(m.group(1)))
+
+        text = re.sub(
+            r"/api/download\?name=([^\s\)\]\"\']+)",
+            _abs,
+            text,
+        )
+    # Append missing download URLs (absolute if configured, else relative).
+    for n in names:
+        url = download_url(n)
+        if url and url not in text and ("download?name=" + n) not in text:
+            text = (text.rstrip() + "\n\nDownload: %s" % url).strip()
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Message handling + short history
 # ---------------------------------------------------------------------------
@@ -347,9 +411,16 @@ def handle_message(update, token=None):
         reply = reply or ("Error: %s" % err)
     if not reply:
         reply = "(No reply)"
+    # Absolute download links when PUBLIC_BASE_URL is set (phone / Tailscale).
+    reply = enrich_telegram_text(reply, result.get("tools") or [])
     send_text(chat_id, reply, token=token)
     _append_history(chat_id, "user", text)
     _append_history(chat_id, "assistant", reply)
+    # Persist to memory/chats/YYYY-MM-DD.md (same store as the web UI).
+    try:
+        append_exchange(text, reply)
+    except Exception:  # noqa: BLE001
+        pass
 
     # After the chat reply, prompt for shell confirm if tools queued one.
     maybe_prompt_shell_confirm(chat_id, token=token)

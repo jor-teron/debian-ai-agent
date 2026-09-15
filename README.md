@@ -1,6 +1,6 @@
 # AI Agent (linux-ai-agent)
 
-Version: see `VERSION` (semver + change #, e.g. `0.3.1 (34)`).
+Version: see `VERSION` (semver + change #, e.g. `0.3.2 (35)`).
 
 Tiny browser chat agent for most Linux distros. Cloud providers (Gemini, ChatGPT, Grok, Claude, DeepSeek, OpenRouter, DeepInfra) plus **Online / Local** modes for Ollama or llama.cpp on your machine.
 
@@ -64,9 +64,12 @@ Chat from your phone (PC stays on; browser not needed).
 
 Only your chat works. If it asks to run a command, reply **YES** or **NO** (any case). For sudo: **YES yourpassword** (or **Y yourpassword**).
 
+File download links in Telegram use `PUBLIC_BASE_URL` when set (absolute URL to `/api/download`); otherwise relative. No `sendDocument` in this release — open the link in the phone browser (Tailscale).
+
 ## Notes
 
-- Browser: default `127.0.0.1:9191`. For LAN, set `HOST=0.0.0.0` in `.env` and open `http://PC-LAN-IP:9191`. Telegram still optional for away-from-home.
+- Browser: default `127.0.0.1:9191`. For LAN / Tailscale, set `HOST=0.0.0.0` (localhost on the PC still works) and open `http://PC-IP:9191`. Set `PUBLIC_BASE_URL=http://100.x.y.z:9191` (your Tailscale IP) so Telegram download links are absolute and open on your phone. Telegram still optional for away-from-home.
+- Chat history: each turn is appended to `~/ai-workspace/memory/chats/YYYY-MM-DD.md` (`#` user / `##` assistant). Web UI reloads today's file on refresh via `GET /api/chat/history`.
 - Layout: install scripts + docs at repo root; Python package in `ai_agent/` (`python3 -m ai_agent` via `./run.sh`). Edit prompts in `ai_agent/prompt_chat` / `prompt_tools`, UI in `ai_agent/ui/`, model lists in `models_ollama` / `models_llamacpp`, shell blocklist in `shell_blocklist`.
 - Token trim: `TOOLS_DEFAULT=0` (tools off unless UI Tools on or message keywords); `HISTORY_TURNS=10`.
 - Keys only in `.env` (never commit).

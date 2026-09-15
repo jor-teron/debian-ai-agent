@@ -1,4 +1,4 @@
-Versioning: `0.3.1 (34)` — semver + change # that +1 every release (never resets).
+Versioning: `0.3.2 (35)` — semver + change # that +1 every release (never resets).
 
 - One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 - Bubblewrap optional in install (`INSTALL_BWRAP=0/1` or prompt); install continues if bwrap unavailable
@@ -6,6 +6,8 @@ Versioning: `0.3.1 (34)` — semver + change # that +1 every release (never rese
 # Features
 
 ## Now
+- **PUBLIC_BASE_URL / Tailscale downloads** — absolute `/api/download` links for Telegram when `PUBLIC_BASE_URL` is set; `HOST=0.0.0.0` + Tailscale IP; relative links when empty; no sendDocument
+- **Chat history Markdown** — persist turns under `memory/chats/YYYY-MM-DD.md` (`:` header, `#` user, `##` assistant); `GET /api/chat/history`; web UI restores on refresh; `HISTORY_TURNS` still caps model context
 - **Memory date dedupe** — `_dated_line` strips a leading `[YYYY-MM-DD]` / `YYYY-MM-DD:` the model may prepend so log lines keep a single system date
 - Old project-name migrate leftovers removed from README / install (new installs never see them)
 - **Package layout** — `ai_agent/` package (`python3 -m ai_agent`); root keeps install/run scripts, VERSION, `.env.example`, docs. Flat package files + `ai_agent/ui/` for static HTML/CSS/JS

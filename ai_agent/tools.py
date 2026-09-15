@@ -49,6 +49,7 @@ from ai_agent.config import (
     provider_key,
     session_should_reset,
     shell_net_env_off,
+    download_url,
 )
 
 
@@ -344,7 +345,12 @@ def tool_read_file(path: str) -> dict:
 
 
 def tool_write_file(path: str, content: str) -> dict:
-    """Write a UTF-8 text file in the workspace (blocked under user/)."""
+    """Write a UTF-8 text file in the workspace (blocked under user/).
+
+    Result includes download: absolute or relative /api/download URL
+    (see config.download_url / PUBLIC_BASE_URL) so Telegram and the model
+    can surface a phone-openable link.
+    """
     ensure_ws()
     t = safe_path(path)
     err = _reject_user_write(t)
@@ -352,11 +358,19 @@ def tool_write_file(path: str, content: str) -> dict:
         return err
     t.parent.mkdir(parents=True, exist_ok=True)
     t.write_text(content, encoding="utf-8")
-    return {"ok": True, "path": str(t), "name": t.name}
+    return {
+        "ok": True,
+        "path": str(t),
+        "name": t.name,
+        "download": download_url(t.name),
+    }
 
 
 def tool_write_bytes(path: str, data: bytes) -> dict:
-    """Write raw bytes (upload API; blocked under user/)."""
+    """Write raw bytes (upload API; blocked under user/).
+
+    Includes download URL (PUBLIC_BASE_URL-aware) like tool_write_file.
+    """
     ensure_ws()
     t = safe_path(path)
     err = _reject_user_write(t)
@@ -364,7 +378,13 @@ def tool_write_bytes(path: str, data: bytes) -> dict:
         return err
     t.parent.mkdir(parents=True, exist_ok=True)
     t.write_bytes(data)
-    return {"ok": True, "path": str(t), "name": t.name, "bytes": len(data)}
+    return {
+        "ok": True,
+        "path": str(t),
+        "name": t.name,
+        "bytes": len(data),
+        "download": download_url(t.name),
+    }
 
 
 
@@ -1043,7 +1063,7 @@ TOOL_DECLS = [
     },
     {
         "name": "write_file",
-        "description": "Write a text file in the workspace",
+        "description": "Write a text file in the workspace. Result includes download URL — include it in your reply so the user can open/download the file.",
         "parameters": {
             "type": "object",
             "properties": {"path": {"type": "string"}, "content": {"type": "string"}},

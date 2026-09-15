@@ -231,6 +231,27 @@ async function fetchHealth(){
   if(h.version) window._ver=h.version;
   return h;
 }
+
+/** Load persisted Markdown chat (GET /api/chat/history) and render turns.
+ *  .md on disk is source of truth; JS is display-only. Cap in-memory history
+ *  sent to the model at 20 entries (server also applies HISTORY_TURNS). */
+async function loadChatHistory(){
+  try{
+    const data=await fetch('/api/chat/history').then(r=>r.json());
+    const turns=data.turns||[];
+    if(!turns.length) return;
+    // Clear any placeholder; re-render from disk.
+    log.innerHTML='';
+    turns.forEach(t=>{
+      const role=(t.role==='user')?'user':'bot';
+      add(role, t.content||'');
+    });
+    // Keep a short tail for the next POST /api/chat history field.
+    history=turns.map(t=>({role:t.role==='user'?'user':'assistant',content:t.content||''}));
+    if(history.length>20) history=history.slice(-20);
+  }catch(e){ /* offline / empty — leave blank chat */ }
+}
+
 async function boot(){
   try{
     const m=await fetch('/api/models').then(r=>r.json());
@@ -255,6 +276,7 @@ async function boot(){
     } else note.textContent='';
     updateStatus();
     await refreshPending();
+    await loadChatHistory();
   }catch(e){
     status.textContent='No server';
     status.className='bad';

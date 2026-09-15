@@ -2,8 +2,8 @@
 HTTP UI and API handler (stdlib http.server).
 
 Serves the chat page from ai_agent/ui/ (via thin ui.py) and JSON API routes
-(including online/local provider catalog, status LED readiness, and
-optional UI_LIGHT_* theme overrides).
+(including online/local provider catalog, status LED readiness,
+optional UI_LIGHT_* theme overrides, and Markdown chat history).
 Does not talk to LLM APIs itself — that is brain.run_chat.
 
 Imports from: ai_agent.config, tools, brain, ui (static page loader).
@@ -44,6 +44,7 @@ from ai_agent.tools import (
     tool_write_file,
 )
 from ai_agent.brain import run_chat
+from ai_agent.chat_history import append_exchange, history_for_api
 from ai_agent.ui import load_index, load_static
 
 
@@ -73,7 +74,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(code, raw, "application/json; charset=utf-8")
 
     def do_GET(self):  # noqa: N802
-        """Handle GET: page, health, models, reminders, download, pending."""
+        """Handle GET: page, health, models, reminders, download, pending, chat history."""
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             # Chat page assembled from ai_agent/ui/ (thin loader in ui.py)
@@ -173,6 +174,10 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._json(200, {"command": None})
             return
+        if path == "/api/chat/history":
+            # Parsed turns from today's memory/chats/YYYY-MM-DD.md (UI refresh).
+            self._json(200, history_for_api())
+            return
         self._json(404, {"ok": False, "error": "Not found"})
 
     def do_POST(self):  # noqa: N802
@@ -255,6 +260,15 @@ class Handler(BaseHTTPRequestHandler):
             history=data.get("history") or [],
             use_tools=tools_flag,
         )
+        # Persist completed exchange to memory/chats/YYYY-MM-DD.md (source of truth).
+        # Do this for both ok and error replies so refresh still shows the turn.
+        reply = (result.get("reply") or "").strip()
+        if not reply and not result.get("ok"):
+            reply = (result.get("error") or "chat failed").strip()
+        try:
+            append_exchange(message, reply or "(No reply)")
+        except Exception:  # noqa: BLE001
+            pass
         self._json(200 if result.get("ok") else 400, result)
 
 
