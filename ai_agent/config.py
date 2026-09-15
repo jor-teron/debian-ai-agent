@@ -91,8 +91,8 @@ def _host_port():
 # ---------------------------------------------------------------------------
 
 # Jail for file/shell tools = whole tree (default ~/ai-workspace).
-# Subdirs created by ensure_ws: memory/, workspace/, workspace/generated/,
-# test/, trash/, user/ plus memory/{chats,date,topics}/ and session/user/assistant.md.
+# Subdirs created by ensure_ws: chats/, memory/, workspace/, workspace/generated/,
+# test/, trash/, user/ plus memory/{date,topics}/ and session/user/assistant.md.
 # Prefer workspace/ for new agent work; user/ is agent read-only.
 WORKSPACE = _workspace_path()
 # Agent must not write/delete under this folder (list/read OK).
@@ -107,8 +107,9 @@ MEMORY_ASSISTANT = MEMORY_DIR / "assistant.md"
 MEMORY_DATE_DIR = MEMORY_DIR / "date"
 # Topic notes live under memory/topics/ (plural). Old memory/topic/ migrates once.
 MEMORY_TOPIC_DIR = MEMORY_DIR / "topics"
-# Chat history Markdown: memory/chats/YYYY_MM/YYYY_MM_DD.md (disk archive only).
-MEMORY_CHATS_DIR = MEMORY_DIR / "chats"
+# Chat history Markdown: chats/YYYY_MM/YYYY_MM_DD.md under WORKSPACE (disk archive only).
+# Old path was memory/chats/ (pre-0.4.2); user moves files manually — no auto-migrate.
+CHATS_DIR = WORKSPACE / "chats"
 # Legacy singular folder name (pre-0.4.1); files moved into topics/ on ensure.
 MEMORY_TOPIC_DIR_LEGACY = MEMORY_DIR / "topic"
 # JSON blob for a shell command waiting for the UI Confirm button.
@@ -488,19 +489,14 @@ def download_url(name):
 
 
 def ensure_memory_dirs():
-    """Create memory/, chats/, date/, topics/ and touch core md files if missing.
+    """Create memory/, date/, topics/ and touch core md files if missing.
 
     Also best-effort migrates old memory/topic/ → memory/topics/.
-    Optionally creates memory/chats/YYYY_MM/ for the current month.
+    Does not create memory/chats/ (chat archives live under WORKSPACE/chats/).
     """
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     MEMORY_DATE_DIR.mkdir(parents=True, exist_ok=True)
     MEMORY_TOPIC_DIR.mkdir(parents=True, exist_ok=True)
-    MEMORY_CHATS_DIR.mkdir(parents=True, exist_ok=True)
-    # Current month folder for daily chat archives (optional but convenient).
-    now = datetime.now()
-    month_dir = MEMORY_CHATS_DIR / ("%04d_%02d" % (now.year, now.month))
-    month_dir.mkdir(parents=True, exist_ok=True)
     # Empty placeholders so the tree is visible on disk after install/start.
     for md in (MEMORY_SESSION, MEMORY_USER, MEMORY_ASSISTANT):
         if not md.exists():
@@ -581,15 +577,19 @@ def shell_net_env_off():
 
 
 def ensure_ws():
-    """Create WORKSPACE tree: workspace/, user/, trash/, test/, memory/...
+    """Create WORKSPACE tree: chats/, memory/, workspace/, user/, trash/, test/.
 
-    Memory gets chats/, date/, topics/ plus empty user.md / assistant.md /
-    session.md (touch). Also ensures workspace/generated/ for Image/Video.
-    Does not delete existing content (upgrade-safe).
+    Creates chats/ plus current-month chats/YYYY_MM/. Memory gets date/,
+    topics/ plus empty user.md / assistant.md / session.md (touch). Also
+    ensures workspace/generated/ for Image/Video. Does not create
+    memory/chats/ (old path pre-0.4.2). Does not delete existing content.
     """
     WORKSPACE.mkdir(parents=True, exist_ok=True)
-    for name in ("memory", "workspace", "test", "trash", "user"):
+    for name in ("chats", "memory", "workspace", "test", "trash", "user"):
         (WORKSPACE / name).mkdir(parents=True, exist_ok=True)
+    # Current month folder for daily chat archives (optional but convenient).
+    now = datetime.now()
+    (CHATS_DIR / ("%04d_%02d" % (now.year, now.month))).mkdir(parents=True, exist_ok=True)
     # Generated media from Image / Video tasks (Telegram attach + web download).
     (WORKSPACE / "workspace" / "generated").mkdir(parents=True, exist_ok=True)
     ensure_memory_dirs()

@@ -82,12 +82,12 @@ Only your chat works. If it asks to run a command, reply **YES** or **NO** (any 
 ## Notes
 
 - Browser: default `127.0.0.1:9191`. For LAN / Tailscale, set `HOST=0.0.0.0` (localhost on the PC still works) and open `http://PC-IP:9191`. Set `PUBLIC_BASE_URL=http://100.x.y.z:9191` for absolute web download links.
-- Chat history: turns append to `~/ai-workspace/memory/chats/YYYY_MM/YYYY_MM_DD.md` (`#` user / `##` assistant). Disk archive only; `HISTORY_TURNS` still caps model context. Web UI reloads today via `GET /api/chat/history`.
+- Chat history: turns append to `~/ai-workspace/chats/YYYY_MM/YYYY_MM_DD.md` (`#` user / `##` assistant). Disk archive only; `HISTORY_TURNS` still caps model context. Web UI reloads today via `GET /api/chat/history`.
 - Layout: install scripts + docs at repo root; Python package in `ai_agent/` (`python3 -m ai_agent` via `./run.sh`). Edit prompts in `ai_agent/prompt_*`, UI in `ai_agent/ui/`, model lists in `models_ollama` / `models_llamacpp`, shell blocklist in `shell_blocklist`.
 - Token trim: `TOOLS_DEFAULT=0` (tools off unless UI Tools on or message keywords); `HISTORY_TURNS=10`.
 - Keys only in `.env` (never commit). `.env.example` has an `env_version` header matching `VERSION`.
-- Files/tools jail: `/home/$USER/ai-workspace` with `memory/`, `workspace/`, `workspace/generated/`, `test/`, `trash/`, `user/` (prefer `workspace/` for new work; `user/` is agent read-only)
-- Memory: `ai-workspace/memory/` (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topics/*.md`, `chats/YYYY_MM/`); legacy `memory.md` / old `topic/` migrate once
+- Files/tools jail: `/home/$USER/ai-workspace` with `chats/`, `memory/`, `workspace/`, `workspace/generated/`, `test/`, `trash/`, `user/` (prefer `workspace/` for new work; `user/` is agent read-only)
+- Memory: `ai-workspace/memory/` (`session.md`, `user.md`, `assistant.md`, `date/YYYY_MM.md`, `topics/*.md`); chat archives: `ai-workspace/chats/YYYY_MM/`; legacy `memory.md` / old `topic/` migrate once
 - Shell: with `bwrap`, freehand inside sandbox (network ON by default; `SHELL_NET=0` to disable). Without bwrap, Confirm / Telegram YES-NO. `sudo` always Confirm (`ALLOW_SUDO=1` default).
 - UI: light theme default (toggle for dark); **Update** button pulls git and restarts the user service.
 - Stop: `systemctl --user stop linux-ai-agent`

@@ -1,11 +1,13 @@
 """
-Persist and parse chat turns as Markdown under AI_HOME/memory/chats/.
+Persist and parse chat turns as Markdown under AI_HOME/chats/.
 
-Day files live at memory/chats/YYYY_MM/YYYY_MM_DD.md (e.g.
-memory/chats/2026_09/2026_09_15.md). They are the disk archive / source of
-truth for UI refresh and Telegram. HISTORY_TURNS (config) still caps how much
-prior chat is sent to the model; these files may keep a full day on disk and
-are NOT sent wholesale to the API.
+Day files live at chats/YYYY_MM/YYYY_MM_DD.md (e.g.
+chats/2026_09/2026_09_15.md) — sibling of memory/ under WORKSPACE. They are
+the disk archive / source of truth for UI refresh and Telegram. HISTORY_TURNS
+(config) still caps how much prior chat is sent to the model; these files may
+keep a full day on disk and are NOT sent wholesale to the API.
+
+Old path was memory/chats/ (pre-0.4.2); user moves files manually — no auto-migrate.
 
 Format (locked):
   : linux-ai-agent chat
@@ -24,14 +26,14 @@ Rules:
   - '#' at line start = user turn (rest of line + body until next turn heading).
   - '##' at line start = assistant turn (check '##' before '#').
 
-Imports from: ai_agent.config (MEMORY_CHATS_DIR, ensure_ws / ensure_memory_dirs).
+Imports from: ai_agent.config (CHATS_DIR, ensure_ws).
 Used by: server (persist + GET /api/chat/history), telegram (persist).
 Stdlib only; Python 3.8+.
 """
 import re
 import threading
 from datetime import datetime
-from ai_agent.config import MEMORY_CHATS_DIR, ensure_memory_dirs, ensure_ws
+from ai_agent.config import CHATS_DIR, ensure_ws
 
 # Serialize appends from web handler threads + Telegram poller.
 _lock = threading.Lock()
@@ -46,15 +48,14 @@ _HEADING_RE = re.compile(r"^(#{1,2})\s?(.*)$")
 
 
 def chats_dir():
-    """Return memory/chats/, creating the tree if needed."""
+    """Return WORKSPACE/chats/, creating the tree if needed."""
     ensure_ws()
-    ensure_memory_dirs()
-    MEMORY_CHATS_DIR.mkdir(parents=True, exist_ok=True)
-    return MEMORY_CHATS_DIR
+    CHATS_DIR.mkdir(parents=True, exist_ok=True)
+    return CHATS_DIR
 
 
 def _month_dir(when):
-    """memory/chats/YYYY_MM/ for the given local datetime."""
+    """chats/YYYY_MM/ for the given local datetime."""
     return chats_dir() / ("%04d_%02d" % (when.year, when.month))
 
 
@@ -64,11 +65,12 @@ def _day_basename(when, sep="_"):
 
 
 def _legacy_flat_candidates(when):
-    """Old flat layouts under memory/chats/ (pre month-folder layout).
+    """Old flat layouts under chats/ (pre month-folder layout).
 
     Candidates (in preference order for migration source):
-      memory/chats/YYYY-MM-DD.md
-      memory/chats/YYYY_MM_DD.md
+      chats/YYYY-MM-DD.md
+      chats/YYYY_MM_DD.md
+    Does not look under memory/chats/ (pre-0.4.2); user moves those manually.
     """
     root = chats_dir()
     return [
@@ -78,9 +80,10 @@ def _legacy_flat_candidates(when):
 
 
 def _maybe_migrate_flat_day(new_path, when):
-    """If an old flat day file exists and new_path does not, move it into place.
+    """If an old flat day file exists under chats/ and new_path does not, move it.
 
     Best-effort; never raises. Returns True if a migrate/move happened.
+    Does not migrate from memory/chats/.
     """
     if new_path.exists():
         return False
@@ -104,11 +107,11 @@ def _maybe_migrate_flat_day(new_path, when):
 
 
 def chat_path_for_day(when=None):
-    """Path to memory/chats/YYYY_MM/YYYY_MM_DD.md for the given (or current) day.
+    """Path to chats/YYYY_MM/YYYY_MM_DD.md for the given (or current) day.
 
-    Prefers the new month-folder layout. Best-effort migrates an old flat
-    day file (YYYY-MM-DD.md or YYYY_MM_DD.md under chats/) into the month
-    folder on first access.
+    Prefers the month-folder layout. Best-effort migrates an old flat day
+    file (YYYY-MM-DD.md or YYYY_MM_DD.md under chats/) into the month folder
+    on first access. Does not migrate from memory/chats/.
     """
     when = when or datetime.now()
     new_path = _month_dir(when) / (_day_basename(when, sep="_") + ".md")
@@ -117,11 +120,11 @@ def chat_path_for_day(when=None):
 
 
 def resolve_chat_path(when=None):
-    """Return the path to read/write for a day, preferring new layout.
+    """Return the path to read/write for a day, preferring month-folder layout.
 
-    If the new path exists (or was just migrated), use it. Else if a legacy
-    flat file still exists (move failed), return that so reads still work.
-    Writes always target the new path via chat_path_for_day.
+    If the month path exists (or was just migrated from flat under chats/),
+    use it. Else if a legacy flat file still exists (move failed), return that
+    so reads still work. Writes always target the month path via chat_path_for_day.
     """
     when = when or datetime.now()
     new_path = chat_path_for_day(when)
@@ -162,7 +165,7 @@ def append_exchange(user_text, assistant_text, when=None):
     Multiline messages are fine: text after the heading line becomes body
     until the next '#' / '##' turn marker.
 
-    Always writes under the new month-folder layout (migrating flat files first).
+    Always writes under the month-folder layout (migrating flat files under chats/ first).
     Returns {"ok": True, "path": ...} or {"ok": False, "error": ..., "path": ...}.
     Never raises.
     """

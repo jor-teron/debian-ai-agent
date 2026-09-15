@@ -185,16 +185,16 @@ ensure_workspace_dirs() {
   # Default AI workspace (~/ai-workspace) matching ensure_ws() tree.
   WS="${HOME}/ai-workspace"
   mkdir -p \
+    "$WS/chats" \
     "$WS/workspace" \
     "$WS/user" \
     "$WS/trash" \
     "$WS/test" \
-    "$WS/memory/chats" \
     "$WS/memory/date" \
     "$WS/memory/topics"
-  # Current month chat folder (optional convenience).
+  # Current month chat folder (optional convenience). Old path was memory/chats/.
   YM=$(date +%Y_%m)
-  mkdir -p "$WS/memory/chats/$YM"
+  mkdir -p "$WS/chats/$YM"
   # Empty memory placeholders (do not overwrite existing content).
   for f in user.md assistant.md session.md; do
     if [ ! -f "$WS/memory/$f" ]; then
