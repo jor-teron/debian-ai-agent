@@ -187,7 +187,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"command": None})
             return
         if path == "/api/chat/history":
-            # Parsed turns from today's memory/chats/YYYY-MM-DD.md (UI refresh).
+            # Parsed turns from today's memory/chats/YYYY_MM/YYYY_MM_DD.md (UI refresh).
             self._json(200, history_for_api())
             return
         self._json(404, {"ok": False, "error": "Not found"})
@@ -277,7 +277,7 @@ class Handler(BaseHTTPRequestHandler):
             image=data.get("image"),
             image_name=(data.get("image_name") or "").strip(),
         )
-        # Persist completed exchange to memory/chats/YYYY-MM-DD.md (source of truth).
+        # Persist completed exchange to memory/chats/YYYY_MM/YYYY_MM_DD.md (source of truth).
         # Do this for both ok and error replies so refresh still shows the turn.
         reply = (result.get("reply") or "").strip()
         if not reply and not result.get("ok"):

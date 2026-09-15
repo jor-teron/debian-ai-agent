@@ -9,7 +9,7 @@ brain.run_chat (same path as the web UI). Shell confirm becomes YES/NO
 Generated / written files are sent via Bot API multipart upload
 (sendPhoto / sendVideo / sendDocument) — no Download: http links in
 Telegram text. Cap 50MB; oversize files are skipped with a clear error.
-Chat turns append to memory/chats/YYYY-MM-DD.md.
+Chat turns append to memory/chats/YYYY_MM/YYYY_MM_DD.md.
 
 Imports from: ai_agent.config, brain, tasks, media, chat_history, tools.
 Used by: run (start_telegram_thread). Respects TOOLS_DEFAULT via run_chat.
@@ -554,7 +554,7 @@ def handle_message(update, token=None):
         send_text(chat_id, "Attach error: %s" % e, token=token)
     _append_history(chat_id, "user", text)
     _append_history(chat_id, "assistant", reply)
-    # Persist to memory/chats/YYYY-MM-DD.md (same store as the web UI).
+    # Persist to memory/chats/YYYY_MM/YYYY_MM_DD.md (same store as the web UI).
     try:
         append_exchange(text, reply)
     except Exception:  # noqa: BLE001

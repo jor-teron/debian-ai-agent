@@ -91,22 +91,26 @@ def _host_port():
 # ---------------------------------------------------------------------------
 
 # Jail for file/shell tools = whole tree (default ~/ai-workspace).
-# Subdirs created by ensure_ws: memory/, workspace/, workspace/generated/, test/, trash/, user/.
+# Subdirs created by ensure_ws: memory/, workspace/, workspace/generated/,
+# test/, trash/, user/ plus memory/{chats,date,topics}/ and session/user/assistant.md.
 # Prefer workspace/ for new agent work; user/ is agent read-only.
 WORKSPACE = _workspace_path()
 # Agent must not write/delete under this folder (list/read OK).
 USER_DIR = WORKSPACE / "user"
 # Legacy single-file memory (migrated once into memory/date/YYYY_MM.md).
 MEMORY_FILE = WORKSPACE / "memory.md"
-# Split memory tree under workspace/memory/ (unchanged layout).
+# Split memory tree under workspace/memory/.
 MEMORY_DIR = WORKSPACE / "memory"
 MEMORY_SESSION = MEMORY_DIR / "session.md"
 MEMORY_USER = MEMORY_DIR / "user.md"
 MEMORY_ASSISTANT = MEMORY_DIR / "assistant.md"
 MEMORY_DATE_DIR = MEMORY_DIR / "date"
-MEMORY_TOPIC_DIR = MEMORY_DIR / "topic"
-# Chat history Markdown day files (Feature B): memory/chats/YYYY-MM-DD.md
+# Topic notes live under memory/topics/ (plural). Old memory/topic/ migrates once.
+MEMORY_TOPIC_DIR = MEMORY_DIR / "topics"
+# Chat history Markdown: memory/chats/YYYY_MM/YYYY_MM_DD.md (disk archive only).
 MEMORY_CHATS_DIR = MEMORY_DIR / "chats"
+# Legacy singular folder name (pre-0.4.1); files moved into topics/ on ensure.
+MEMORY_TOPIC_DIR_LEGACY = MEMORY_DIR / "topic"
 # JSON blob for a shell command waiting for the UI Confirm button.
 # Shape: {"command": "...", "sudo": true|false}
 PENDING_SHELL = WORKSPACE / ".pending_shell.json"
@@ -127,11 +131,41 @@ def memory_date_path(when=None):
 
 
 def memory_topic_path(name):
-    """Safe path under memory/topic/<name>.md (alphanumeric, dash, underscore)."""
+    """Safe path under memory/topics/<name>.md (alphanumeric, dash, underscore)."""
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", (name or "").strip()).strip("_")
     if not safe:
         raise ValueError("Empty or invalid topic name")
     return MEMORY_TOPIC_DIR / (safe + ".md")
+
+
+def migrate_legacy_topic_dir():
+    """Best-effort: move files from old memory/topic/ into memory/topics/ once.
+
+    Only migrates when the legacy singular folder exists. Existing targets in
+    topics/ are left alone (no overwrite). Empty legacy dir is removed.
+    """
+    legacy = MEMORY_TOPIC_DIR_LEGACY
+    if not legacy.exists() or not legacy.is_dir():
+        return False
+    MEMORY_TOPIC_DIR.mkdir(parents=True, exist_ok=True)
+    moved = False
+    try:
+        for p in list(legacy.iterdir()):
+            if not p.is_file():
+                continue
+            dest = MEMORY_TOPIC_DIR / p.name
+            if dest.exists():
+                continue
+            p.replace(dest)
+            moved = True
+        # Remove empty legacy dir (ignore leftover non-empty).
+        try:
+            next(legacy.iterdir())
+        except StopIteration:
+            legacy.rmdir()
+    except OSError:
+        return moved
+    return moved
 
 
 # ---------------------------------------------------------------------------
@@ -454,10 +488,27 @@ def download_url(name):
 
 
 def ensure_memory_dirs():
-    """Create memory/, memory/date/, memory/topic/ if missing."""
+    """Create memory/, chats/, date/, topics/ and touch core md files if missing.
+
+    Also best-effort migrates old memory/topic/ → memory/topics/.
+    Optionally creates memory/chats/YYYY_MM/ for the current month.
+    """
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     MEMORY_DATE_DIR.mkdir(parents=True, exist_ok=True)
     MEMORY_TOPIC_DIR.mkdir(parents=True, exist_ok=True)
+    MEMORY_CHATS_DIR.mkdir(parents=True, exist_ok=True)
+    # Current month folder for daily chat archives (optional but convenient).
+    now = datetime.now()
+    month_dir = MEMORY_CHATS_DIR / ("%04d_%02d" % (now.year, now.month))
+    month_dir.mkdir(parents=True, exist_ok=True)
+    # Empty placeholders so the tree is visible on disk after install/start.
+    for md in (MEMORY_SESSION, MEMORY_USER, MEMORY_ASSISTANT):
+        if not md.exists():
+            try:
+                md.touch()
+            except OSError:
+                pass
+    migrate_legacy_topic_dir()
 
 
 
@@ -530,10 +581,11 @@ def shell_net_env_off():
 
 
 def ensure_ws():
-    """Create WORKSPACE and standard subdirs (memory/workspace/test/trash/user).
+    """Create WORKSPACE tree: workspace/, user/, trash/, test/, memory/...
 
-    Also ensures workspace/generated/ for Image/Video task output.
-    Does not delete existing content (upgrade-safe). Memory tree stays intact.
+    Memory gets chats/, date/, topics/ plus empty user.md / assistant.md /
+    session.md (touch). Also ensures workspace/generated/ for Image/Video.
+    Does not delete existing content (upgrade-safe).
     """
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     for name in ("memory", "workspace", "test", "trash", "user"):

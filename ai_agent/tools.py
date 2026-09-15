@@ -61,7 +61,7 @@ from ai_agent.config import (
 #   memory/user.md        — lasting user facts
 #   memory/assistant.md   — extras for the AI (not a copy of prompt_chat)
 #   memory/date/YYYY_MM.md — monthly logs: "- [YYYY-MM-DD] : text"
-#   memory/topic/<name>.md — same line format
+#   memory/topics/<name>.md — same line format (legacy memory/topic/ migrates once)
 # Legacy: if workspace/memory.md exists and the new tree is empty, migrate once.
 
 # Caps for prompt injection (chars). Full files still readable via memory_read.
@@ -161,7 +161,10 @@ def _append_to_file(path, chunk):
 
 
 def memory_resolve_dest(dest):
-    """Map dest string → Path. dest: session|user|assistant|date|topic:<name>."""
+    """Map dest string → Path. dest: session|user|assistant|date|topics:<name>.
+
+    Also accepts legacy dest prefix topic:<name> (same folder: memory/topics/).
+    """
     ensure_memory_dirs()
     d = (dest or "date").strip().lower()
     if d == "session":
@@ -172,16 +175,17 @@ def memory_resolve_dest(dest):
         return MEMORY_ASSISTANT, False
     if d == "date" or d == "":
         return memory_date_path(), True
-    if d.startswith("topic:"):
+    # Primary: topics:<name>; legacy alias topic:<name> (pre-0.4.1 dest string).
+    if d.startswith("topics:") or d.startswith("topic:"):
         name = d.split(":", 1)[1].strip()
         return memory_topic_path(name), True
     raise ValueError(
-        "dest must be session|user|assistant|date|topic:<name> (got %r)" % dest
+        "dest must be session|user|assistant|date|topics:<name> (got %r)" % dest
     )
 
 
 def memory_append(note, dest="date"):
-    """Append a note. dest: session|user|assistant|date|topic:<name> (default date)."""
+    """Append a note. dest: session|user|assistant|date|topics:<name> (default date)."""
     ensure_ws()
     migrate_legacy_memory()
     maybe_reset_session()
@@ -198,7 +202,7 @@ def memory_append(note, dest="date"):
 
 
 def memory_read(target=None):
-    """Read memory file(s). target: session|user|assistant|date|topic:<name>|all."""
+    """Read memory file(s). target: session|user|assistant|date|topics:<name>|all."""
     ensure_ws()
     migrate_legacy_memory()
     maybe_reset_session()
@@ -215,7 +219,7 @@ def memory_read(target=None):
             body = _read_capped(path, cap).strip()
             if body:
                 parts.append("### %s (%s)\n%s" % (label, path.name, body))
-        # List topic files briefly
+        # List topics/ files briefly
         topics = []
         if MEMORY_TOPIC_DIR.exists():
             for p in sorted(MEMORY_TOPIC_DIR.glob("*.md")):
@@ -229,14 +233,14 @@ def memory_read(target=None):
             "topics": topics,
         }
     try:
-        if t.startswith("topic:"):
+        if t.startswith("topics:") or t.startswith("topic:"):
             path, _ = memory_resolve_dest(t)
         elif t in ("session", "user", "assistant", "date"):
             path, _ = memory_resolve_dest(t)
         else:
             return {
                 "ok": False,
-                "error": "target must be session|user|assistant|date|topic:<name>|all",
+                "error": "target must be session|user|assistant|date|topics:<name>|all",
             }
     except ValueError as e:
         return {"ok": False, "error": str(e)}
@@ -1081,27 +1085,27 @@ TOOL_DECLS = [
     },
     {
         "name": "memory_read",
-        "description": "Read memory. target: session|user|assistant|date|topic:<name>|all (default all)",
+        "description": "Read memory. target: session|user|assistant|date|topics:<name>|all (default all)",
         "parameters": {
             "type": "object",
             "properties": {
                 "target": {
                     "type": "string",
-                    "description": "session|user|assistant|date|topic:<name>|all",
+                    "description": "session|user|assistant|date|topics:<name>|all",
                 }
             },
         },
     },
     {
         "name": "memory_append",
-        "description": "Append a note. dest: session|user|assistant|date|topic:<name> (default date = this month)",
+        "description": "Append a note. dest: session|user|assistant|date|topics:<name> (default date = this month)",
         "parameters": {
             "type": "object",
             "properties": {
                 "note": {"type": "string"},
                 "dest": {
                     "type": "string",
-                    "description": "session|user|assistant|date|topic:<name>",
+                    "description": "session|user|assistant|date|topics:<name>",
                 },
             },
             "required": ["note"],

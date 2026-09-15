@@ -1,4 +1,4 @@
-Versioning: `0.4.0 (36)` — semver + change # that +1 every release (never resets).
+Versioning: `0.4.1 (37)` — semver + change # that +1 every release (never resets).
 
 - One-line install via `install.sh` (detects apt-get/dnf/yum/pacman/zypper/apk; most Linux distros)
 - Bubblewrap optional in install (`INSTALL_BWRAP=0/1` or prompt); install continues if bwrap unavailable
@@ -11,7 +11,10 @@ Versioning: `0.4.0 (36)` — semver + change # that +1 every release (never rese
 - **Image / Video / Vision** — Online APIs where available (Gemini image + Veo best-effort, OpenAI Images, multimodal vision); Local best-effort / clear unsupported; saves under `workspace/generated/`
 - **Telegram media attach** — `sendPhoto` / `sendVideo` / `sendDocument` multipart (≤50MB); no Download: http link injection; photos → Vision; `/image` `/video` shortcuts
 - **PUBLIC_BASE_URL** — still for web/LAN absolute `/api/download`; Telegram does not rely on links
-- **Chat history Markdown** — persist turns under `memory/chats/YYYY-MM-DD.md`; `GET /api/chat/history`; web UI restores on refresh; `HISTORY_TURNS` caps model context
+- **Chat history Markdown** — persist under `memory/chats/YYYY_MM/YYYY_MM_DD.md` (disk archive); `GET /api/chat/history`; web UI restores on refresh; `HISTORY_TURNS` caps model context (not the full day file)
+- **.env header** — `.env.example` starts with `env_version` matching `VERSION` (no runtime outdated warning)
+- **topics/** — memory notes in `memory/topics/` (was `topic/`); dest `topics:<name>`; legacy folder migrates once
+- **ensure_ws tree** — creates `workspace/`, `user/`, `trash/`, `test/`, `memory/{chats,date,topics}/` and touches `user.md` / `assistant.md` / `session.md`
 - **Memory date dedupe** — `_dated_line` strips a leading date the model may prepend
 - **Package layout** — `ai_agent/` package; `media.py` + `tasks.py` helpers; `ai_agent/ui/` static files
 - **Editable prompts** — `prompt_chat` / `prompt_tools` / `prompt_image` / `prompt_video` / `prompt_vision`
@@ -20,7 +23,7 @@ Versioning: `0.4.0 (36)` — semver + change # that +1 every release (never rese
 - **Multi-provider chat (online)** — gemini, openai, xai, anthropic, deepseek, openrouter, deepinfra
 - **Local providers** — Ollama + llama.cpp; OpenAI-compatible; no API key
 - **Status LED** — green solid when ready; red blink when not; `STATUS_BLINK_MS`
-- **Workspace folders** — jail = `~/ai-workspace` with `memory/`, `workspace/`, `workspace/generated/`, `test/`, `trash/`, `user/`
+- **Workspace folders** — jail = `~/ai-workspace` with `memory/` (chats/date/topics + md), `workspace/`, `workspace/generated/`, `test/`, `trash/`, `user/`
 - **Light mode default** — dark available; optional `UI_LIGHT_*` hex overrides
 - **Update button** — `POST /api/update`
 - Shell blocklist + sudo Confirm; bubblewrap freehand when available
